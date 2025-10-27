@@ -1,0 +1,105 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    /* Windows 95 Classic Color Scheme */
+    --background: 0 0% 75%; /* #C0C0C0 - Classic Windows gray */
+    --foreground: 0 0% 0%; /* Black text */
+
+    --card: 40 8% 80%; /* #D4D0C8 - Panel color */
+    --card-foreground: 0 0% 0%;
+
+    --popover: 40 8% 80%;
+    --popover-foreground: 0 0% 0%;
+
+    --primary: 240 100% 25%; /* #000080 - Windows blue */
+    --primary-foreground: 0 0% 100%; /* White */
+
+    --secondary: 0 0% 88%; /* #E0E0E0 - Light panel */
+    --secondary-foreground: 0 0% 0%;
+
+    --muted: 0 0% 88%;
+    --muted-foreground: 0 0% 40%;
+
+    --accent: 220 100% 50%; /* #0055FF - Bright blue */
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 100% 50%; /* Bright red */
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 0 0% 50%; /* Dark gray for borders */
+    --input: 0 0% 100%; /* White input background */
+    --ring: 240 100% 25%;
+
+    --radius: 0rem; /* No rounded corners - pure retro */
+
+    /* Windows 95 3D effect colors */
+    --win95-light: 0 0% 100%; /* White highlight */
+    --win95-dark: 0 0% 25%; /* Dark shadow */
+    --win95-face: 40 8% 80%; /* Button face */
+    --win95-shadow: 0 0% 50%; /* Medium shadow */
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-tahoma;
+  }
+}
+
+/* Windows 95 UI Elements */
+@layer components {
+  .win95-border {
+    border: 2px solid;
+    border-color: hsl(var(--win95-light)) hsl(var(--win95-dark)) hsl(var(--win95-dark)) hsl(var(--win95-light));
+  }
+
+  .win95-border-inset {
+    border: 2px solid;
+    border-color: hsl(var(--win95-dark)) hsl(var(--win95-light)) hsl(var(--win95-light)) hsl(var(--win95-dark));
+  }
+
+  .win95-panel {
+    @apply bg-card win95-border p-2;
+  }
+
+  .win95-button {
+    @apply bg-card px-6 py-2 font-bold text-foreground;
+    border: 2px solid;
+    border-color: hsl(var(--win95-light)) hsl(var(--win95-dark)) hsl(var(--win95-dark)) hsl(var(--win95-light));
+  }
+
+  .win95-button:active {
+    border-color: hsl(var(--win95-dark)) hsl(var(--win95-light)) hsl(var(--win95-light)) hsl(var(--win95-dark));
+    transform: translate(1px, 1px);
+  }
+
+  .win95-button:disabled {
+    @apply text-muted-foreground cursor-not-allowed;
+  }
+
+  .win95-window {
+    @apply bg-card;
+    border: 2px solid;
+    border-color: hsl(var(--win95-light)) hsl(var(--win95-dark)) hsl(var(--win95-dark)) hsl(var(--win95-light));
+  }
+
+  .win95-titlebar {
+    @apply bg-primary text-primary-foreground px-1 py-1 font-bold flex items-center justify-between;
+  }
+
+  .win95-input {
+    @apply bg-input border-2 px-2 py-1;
+    border-color: hsl(var(--win95-dark)) hsl(var(--win95-light)) hsl(var(--win95-light)) hsl(var(--win95-dark));
+  }
+}
