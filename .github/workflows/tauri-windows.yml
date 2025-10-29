@@ -33,17 +33,30 @@ jobs:
       - name: Build (Tauri)
         run: npm run tauri:build
 
-      - name: List bundle outputs
+      - name: List bundle outputs (noop)
+        shell: pwsh
         run: |
-          dir src-tauri\target\release\bundle\windows /s
+          Write-Host 'Skipping directory listing to avoid failures when bundle path is absent.'
 
       - name: Prepare portable EXE (raw)
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path dist-windows -Force | Out-Null
-          $exe = Get-ChildItem -Path src-tauri/target/release -Filter *.exe -File | Select-Object -First 1
+          $exe = Get-ChildItem -Path src-tauri/target/release -Filter app.exe -File | Select-Object -First 1
+          if (-not $exe) { $exe = Get-ChildItem -Path src-tauri/target/release -Filter *.exe -File | Select-Object -First 1 }
           if ($exe) {
             Copy-Item $exe.FullName "dist-windows/Dither Yuki.exe" -Force
+          }
+
+      - name: Place EXE at repository root
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path src-tauri/target/release -Filter app.exe -File | Select-Object -First 1
+          if (-not $exe) { $exe = Get-ChildItem -Path src-tauri/target/release -Filter *.exe -File | Select-Object -First 1 }
+          if ($exe) {
+            Copy-Item $exe.FullName "Dither Yuki.exe" -Force
+          } elseif (Test-Path 'dist-windows/Dither Yuki.exe') {
+            Copy-Item 'dist-windows/Dither Yuki.exe' "Dither Yuki.exe" -Force
           }
 
       - name: Upload Windows EXE artifact
@@ -51,6 +64,7 @@ jobs:
         with:
           name: dither-yuki-windows-portable
           path: |
-            src-tauri/target/release/bundle/windows/**
+            Dither Yuki.exe
             dist-windows/**
+            src-tauri/target/release/*.exe
           if-no-files-found: warn
