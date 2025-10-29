@@ -9,12 +9,12 @@ Retro-style image dithering and processing tool. Free alternative to Dither Boy 
 <p>
   <a href="./downloads/Dither%20Yuki-macOS-portable.zip"
      style="display:inline-block;padding:14px 22px;margin:6px;text-decoration:none;font-weight:700;letter-spacing:1px;color:#ffffff;background:#111111;border:3px double #ffffff;box-shadow:inset 0 0 0 2px #111111;">
-    <img src="./macos.png" alt="macOS" style="height:20px;vertical-align:middle;margin-right:10px" />
+    <img src="./macos.png" alt="macOS" style="height:60px;vertical-align:middle;margin-right:10px" />
     DOWNLOAD for macOS ↓
   </a>
   <a href="https://github.com/edrdavid1/classic-canvas-forge/releases"
      style="display:inline-block;padding:14px 22px;margin:6px;text-decoration:none;font-weight:700;letter-spacing:1px;color:#ffffff;background:#111111;border:3px double #ffffff;box-shadow:inset 0 0 0 2px #111111;">
-    <img src="./windows.png" alt="Windows" style="height:20px;vertical-align:middle;margin-right:10px" />
+    <img src="./windows.png" alt="Windows" style="height:60px;vertical-align:middle;margin-right:10px" />
     DOWNLOAD for Windows ↓
   </a>
   <br/>
