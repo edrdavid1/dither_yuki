@@ -40,27 +40,27 @@ Free to use for artists, indie devs, and small teams under the Fair Creative Lic
 
 Explore classic and modern error-diffusion and ordered dithering variants.
 
-![Algorithms](./algorithms.png)
+<img src="./alg.png" alt="Algorithms" width="800" />
 
 ### Color Palettes
 
 Choose from built-ins or create your own palette in the editor.
 
-![Color Palette](./color_palette.png)
+<img src="./color_palette.png" alt="Color Palette" width="800" />
 
 ### Interface
 
 Compact Win95-inspired UI with live preview and side controls.
 
-![Interface 1](./interface1.png)
+<img src="./interface1.png" alt="Interface 1" width="800" />
 
-![Interface 2](./interface2.png)
+<img src="./interface2.png" alt="Interface 2" width="800" />
 
 ### Preset Manager
 
 Save and reuse your favorite settings for quick workflows.
 
-![Preset Manager](./ipreset%20maneger.png)
+<img src="./ipreset%20maneger.png" alt="Preset Manager" width="800" />
 
 ## Downloads
 
