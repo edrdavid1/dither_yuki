@@ -1,4 +1,61 @@
-## Fair Creative License (FCL)
+<div align="center">
+
+<img src="./face_img.png" alt="Dither Yuki" width="160" />
+
+# Dither Yuki
+
+Retro-style image dithering and processing tool. Free alternative to Dither Boy and Ditherton Pro.
+
+</div>
+
+## Overview
+
+Dither Yuki is a desktop app focused on high‑quality dithering with a classic Win95 aesthetic. It runs locally, works offline, and keeps your images on your device.
+
+Free to use for artists, indie devs, and small teams under the Fair Creative License (FCL). See License section below.
+
+## Features
+
+- Multiple dithering algorithms
+- Real-time preview (Before/After)
+- Image adjustments: contrast, brightness, saturation, blur, sharpness, noise
+- Pixel scale (pixelation)
+- Custom palettes with editor
+- Preset management (planned)
+- Keyboard shortcuts (Photoshop-like): Cmd/Ctrl+O/S/E/R/P
+
+## Downloads
+
+- macOS: portable .app bundle
+  - Build locally: `npm run tauri:build` → `src-tauri/target/release/bundle/macos/Dither Yuki.app`
+  - Optional zip for sharing
+- Windows: portable `.exe`
+  - Built via GitHub Actions (workflow: Build Windows EXE (Tauri))
+  - Artifact name: `dither-yuki-windows-portable` contains `Dither Yuki.exe`
+
+If you don't see ready-made artifacts, run the workflows or build locally (see Dev section).
+
+## Usage
+
+1. Open an image (Cmd/Ctrl+O)
+2. Tune dithering and adjustments on the left panel
+3. Switch Before/After, zoom, and export (Cmd/Ctrl+E)
+
+## Development
+
+- Requirements: Node.js 20+, Rust stable
+- Install: `npm ci`
+- Dev: `npm run dev`
+- Desktop (Tauri):
+  - macOS debug: `npm run tauri:dev`
+  - Build release: `npm run tauri:build`
+
+## About
+
+- App: Dither Yuki — Version 1.0.0
+- Developer: L'eco di Bergamo¹
+
+## License — Fair Creative License (FCL)
 
 Version 1.0 — 2025
 

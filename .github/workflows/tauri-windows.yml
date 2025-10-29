@@ -33,6 +33,15 @@ jobs:
       - name: Build (Tauri)
         run: npm run tauri:build
 
+      - name: Set EXE icon (rcedit)
+        shell: pwsh
+        run: |
+          $exe = Join-Path $pwd 'src-tauri/target/release/app.exe'
+          if (-not (Test-Path $exe)) { $exe = (Get-ChildItem 'src-tauri/target/release' -Filter *.exe -File | Select-Object -First 1).FullName }
+          if ($exe) {
+            npx --yes rcedit "$exe" --set-icon "src-tauri/icons/icon.ico"
+          }
+
       - name: List bundle outputs (noop)
         shell: pwsh
         run: |
