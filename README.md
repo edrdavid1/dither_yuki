@@ -6,11 +6,23 @@
 
 Retro-style image dithering and processing tool. Free alternative to Dither Boy and Ditherton Pro.
 
+<p>
+  <a href="./downloads/Dither%20Yuki-macOS-portable.zip" style="display:inline-block;padding:10px 16px;background:#0ea5e9;color:#fff;border-radius:6px;text-decoration:none;font-weight:600;margin:4px">
+    ⬇ Download for macOS (.zip)
+  </a>
+  <a href="https://github.com/edrdavid1/classic-canvas-forge/releases" style="display:inline-block;padding:10px 16px;background:#22c55e;color:#fff;border-radius:6px;text-decoration:none;font-weight:600;margin:4px">
+    ⬇ Download for Windows (.exe)
+  </a>
+  <br/>
+  <small>macOS: portable .app inside zip. Windows: portable .exe available in Releases.</small>
+  
+</p>
+
 </div>
 
 ## Overview
 
-Dither Yuki is a desktop app focused on high‑quality dithering with a classic Win95 aesthetic. It runs locally, works offline, and keeps your images on your device.
+Dither Yuki is a desktop app focused on high‑quality dithering . It runs locally, works offline, and keeps your images on your device.
 
 Free to use for artists, indie devs, and small teams under the Fair Creative License (FCL). See License section below.
 
