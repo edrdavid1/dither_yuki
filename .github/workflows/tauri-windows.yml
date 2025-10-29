@@ -37,10 +37,20 @@ jobs:
         run: |
           dir src-tauri\target\release\bundle\windows /s
 
+      - name: Prepare portable EXE (raw)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist-windows -Force | Out-Null
+          $exe = Get-ChildItem -Path src-tauri/target/release -Filter *.exe -File | Select-Object -First 1
+          if ($exe) {
+            Copy-Item $exe.FullName "dist-windows/Dither Yuki.exe" -Force
+          }
+
       - name: Upload Windows EXE artifact
         uses: actions/upload-artifact@v4
         with:
           name: dither-yuki-windows-portable
           path: |
             src-tauri/target/release/bundle/windows/**
+            dist-windows/**
           if-no-files-found: warn
