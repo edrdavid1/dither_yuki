@@ -36,6 +36,32 @@ Free to use for artists, indie devs, and small teams under the Fair Creative Lic
 - Preset management (planned)
 - Keyboard shortcuts (Photoshop-like): Cmd/Ctrl+O/S/E/R/P
 
+### Dithering Algorithms
+
+Explore classic and modern error-diffusion and ordered dithering variants.
+
+![Algorithms](./algorithms.png)
+
+### Color Palettes
+
+Choose from built-ins or create your own palette in the editor.
+
+![Color Palette](./color_palette.png)
+
+### Interface
+
+Compact Win95-inspired UI with live preview and side controls.
+
+![Interface 1](./interface1.png)
+
+![Interface 2](./interface2.png)
+
+### Preset Manager
+
+Save and reuse your favorite settings for quick workflows.
+
+![Preset Manager](./ipreset%20maneger.png)
+
 ## Downloads
 
 - macOS: portable .app bundle
