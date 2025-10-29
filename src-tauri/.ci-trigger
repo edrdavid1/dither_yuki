@@ -1,0 +1,3 @@
+trigger: windows-exe-build
+at: 2025-10-29T14:23:00Z
+note: harmless file to trigger GitHub Actions workflow
