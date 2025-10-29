@@ -33,39 +33,34 @@ jobs:
       - name: Build (Tauri)
         run: npm run tauri:build
 
-      - name: Set EXE icon (rcedit)
+      # Removed rcedit: Tauri bundle exe already has icon via tauri.conf.json
+      - name: Verify build outputs
         shell: pwsh
         run: |
-          $exe = Join-Path $pwd 'src-tauri/target/release/app.exe'
-          if (-not (Test-Path $exe)) { $exe = (Get-ChildItem 'src-tauri/target/release' -Filter *.exe -File | Select-Object -First 1).FullName }
-          if ($exe) {
-            npx --yes rcedit "$exe" --set-icon "src-tauri/icons/icon.ico"
-          }
+          Get-ChildItem -Path src-tauri/target/release -Recurse -ErrorAction SilentlyContinue | Select-Object -First 50 | ForEach-Object { Write-Host $_.FullName }
+          Get-ChildItem -Path src-tauri/target/release/bundle/windows -Recurse -ErrorAction SilentlyContinue | Select-Object -First 50 | ForEach-Object { Write-Host $_.FullName }
 
-      - name: List bundle outputs (noop)
-        shell: pwsh
-        run: |
-          Write-Host 'Skipping directory listing to avoid failures when bundle path is absent.'
-
-      - name: Prepare portable EXE (raw)
+      - name: Collect portable EXE
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path dist-windows -Force | Out-Null
-          $exe = Get-ChildItem -Path src-tauri/target/release -Filter app.exe -File | Select-Object -First 1
-          if (-not $exe) { $exe = Get-ChildItem -Path src-tauri/target/release -Filter *.exe -File | Select-Object -First 1 }
-          if ($exe) {
-            Copy-Item $exe.FullName "dist-windows/Dither Yuki.exe" -Force
-          }
 
-      - name: Place EXE at repository root
-        shell: pwsh
-        run: |
-          $exe = Get-ChildItem -Path src-tauri/target/release -Filter app.exe -File | Select-Object -First 1
-          if (-not $exe) { $exe = Get-ChildItem -Path src-tauri/target/release -Filter *.exe -File | Select-Object -First 1 }
-          if ($exe) {
-            Copy-Item $exe.FullName "Dither Yuki.exe" -Force
-          } elseif (Test-Path 'dist-windows/Dither Yuki.exe') {
-            Copy-Item 'dist-windows/Dither Yuki.exe' "Dither Yuki.exe" -Force
+          # Prefer bundled exe (contains icon)
+          $bundleExe = Get-ChildItem -Path src-tauri/target/release/bundle/windows -Filter *.exe -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+
+          if ($bundleExe) {
+            Copy-Item $bundleExe.FullName "Dither Yuki.exe" -Force
+            Copy-Item $bundleExe.FullName "dist-windows/Dither Yuki.exe" -Force
+          } else {
+            # Fallback to raw exe
+            $exe = Get-ChildItem -Path src-tauri/target/release -Filter app.exe -File -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $exe) { $exe = Get-ChildItem -Path src-tauri/target/release -Filter *.exe -File -ErrorAction SilentlyContinue | Select-Object -First 1 }
+            if ($exe) {
+              Copy-Item $exe.FullName "Dither Yuki.exe" -Force
+              Copy-Item $exe.FullName "dist-windows/Dither Yuki.exe" -Force
+            } else {
+              Write-Host "No EXE found under src-tauri/target/release. Check build logs."; exit 1
+            }
           }
 
       - name: Upload Windows EXE artifact
