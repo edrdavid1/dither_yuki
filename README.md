@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="./face_img.png" alt="Dither Yuki" width="160" />
+<img src="./face_img.png" alt="Dither Yuki" width="256" />
 
 # Dither Yuki
 
