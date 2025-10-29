@@ -75,14 +75,22 @@ Save and reuse your favorite settings for quick workflows.
 
 ## Downloads
 
-- macOS: portable .app bundle
-  - Build locally: `npm run tauri:build` → `src-tauri/target/release/bundle/macos/Dither Yuki.app`
-  - Optional zip for sharing
-- Windows: portable `.exe`
-  - Built via GitHub Actions (workflow: Build Windows EXE (Tauri))
-  - Artifact name: `dither-yuki-windows-portable` contains `Dither Yuki.exe`
+### Ready-to-use builds
 
-If you don't see ready-made artifacts, run the workflows or build locally (see Dev section).
+- **macOS**: [Download v1.0.0 (.zip)](https://github.com/edrdavid1/dither_yuki/releases/download/v1.0.0/Dither.Yuki-macOS-v1.0.0.zip)
+  - Extract the zip and run `Dither Yuki.app`
+  - Portable, no installation required
+
+- **Windows**: [Download v1.0.0 (.exe)](https://github.com/edrdavid1/dither_yuki/releases/download/v1.0.0/Dither.Yuki-Windows-v1.0.0.exe)
+  - Portable executable, no installation required
+  - Just download and run
+
+### Build from source
+
+- macOS: `npm run tauri:build` → `src-tauri/target/release/bundle/macos/Dither Yuki.app`
+- Windows: Run GitHub Actions workflow "Build Windows EXE (Tauri)" or build locally with Tauri CLI
+
+See [Development](#development) section for setup instructions.
 
 ## Usage
 
