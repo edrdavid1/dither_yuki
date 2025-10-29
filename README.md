@@ -4,34 +4,27 @@
 
 # Dither Yuki
 
-Retro-style image dithering and processing tool. Free alternative to Dither Boy and Ditherton Pro.
-
 <h3 align="center">🖼️ Retro-style image dithering and processing tool</h3>
 <p align="center"><em>Free alternative to Dither Boy and Ditherton Pro</em></p>
 
 <p align="center">
   <img src="./macos.png" alt="macOS" height="70"><br/>
-  <a href="./downloads/Dither%20Yuki-macOS-portable.zip"
-     style="font-family:'Courier New',monospace;white-space:pre;text-decoration:none;color:#00ffcc;background:#0a0a0a;border:none;display:inline-block;padding:8px 16px;margin-top:6px;">
-╔══════════════════════════╗<br/>
-║   DOWNLOAD for macOS ↓   ║<br/>
-╚══════════════════════════╝
+  <a href="./downloads/Dither%20Yuki-macOS-portable.zip">
+    <code>╔════════════════════╗<br/>║   DOWNLOAD for macOS ↓   ║<br/>╚════════════════════╝</code>
   </a>
 </p>
 
 <p align="center">
   <img src="./windows.png" alt="Windows" height="70"><br/>
-  <a href="https://github.com/edrdavid1/classic-canvas-forge/releases"
-     style="font-family:'Courier New',monospace;white-space:pre;text-decoration:none;color:#00aaff;background:#0a0a0a;border:none;display:inline-block;padding:8px 16px;margin-top:6px;">
-╔════════════════════════════╗<br/>
-║   DOWNLOAD for Windows ↓   ║<br/>
-╚════════════════════════════╝
+  <a href="https://github.com/edrdavid1/classic-canvas-forge/releases">
+    <code>╔════════════════════╗<br/>║   DOWNLOAD for Windows ↓   ║<br/>╚════════════════════╝</code>
   </a>
 </p>
 
 <p align="center">
-  <small style="color:#777;">macOS: portable .app inside zip. Windows: portable .exe available in Releases.</small>
+  <small>macOS: portable .app inside zip. Windows: portable .exe available in Releases.</small>
 </p>
+
 
 
 </div>
