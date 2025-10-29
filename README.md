@@ -7,15 +7,18 @@
 Retro-style image dithering and processing tool. Free alternative to Dither Boy and Ditherton Pro.
 
 <p>
-  <a href="./downloads/Dither%20Yuki-macOS-portable.zip" style="display:inline-block;padding:10px 16px;background:#0ea5e9;color:#fff;border-radius:6px;text-decoration:none;font-weight:600;margin:4px">
-    ⬇ Download for macOS (.zip)
+  <a href="./downloads/Dither%20Yuki-macOS-portable.zip"
+     style="display:inline-block;padding:14px 22px;margin:6px;text-decoration:none;font-weight:700;letter-spacing:1px;color:#ffffff;background:#111111;border:3px double #ffffff;box-shadow:inset 0 0 0 2px #111111;">
+    <img src="./macos.png" alt="macOS" style="height:20px;vertical-align:middle;margin-right:10px" />
+    DOWNLOAD for macOS ↓
   </a>
-  <a href="https://github.com/edrdavid1/classic-canvas-forge/releases" style="display:inline-block;padding:10px 16px;background:#22c55e;color:#fff;border-radius:6px;text-decoration:none;font-weight:600;margin:4px">
-    ⬇ Download for Windows (.exe)
+  <a href="https://github.com/edrdavid1/classic-canvas-forge/releases"
+     style="display:inline-block;padding:14px 22px;margin:6px;text-decoration:none;font-weight:700;letter-spacing:1px;color:#ffffff;background:#111111;border:3px double #ffffff;box-shadow:inset 0 0 0 2px #111111;">
+    <img src="./windows.png" alt="Windows" style="height:20px;vertical-align:middle;margin-right:10px" />
+    DOWNLOAD for Windows ↓
   </a>
   <br/>
   <small>macOS: portable .app inside zip. Windows: portable .exe available in Releases.</small>
-  
 </p>
 
 </div>
