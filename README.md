@@ -6,20 +6,22 @@
 
 Retro-style image dithering and processing tool. Free alternative to Dither Boy and Ditherton Pro.
 
-<p>
+<p align="center">
   <a href="./downloads/Dither%20Yuki-macOS-portable.zip"
-     style="display:inline-flex;flex-direction:column;align-items:center;padding:14px 22px;margin:6px;text-decoration:none;font-weight:700;letter-spacing:1px;color:#ffffff;background:#111111;border:3px double #ffffff;box-shadow:inset 0 0 0 2px #111111;">
-    <img src="./macos.png" alt="macOS" style="height:60px;margin-bottom:10px;" />
-    DOWNLOAD for macOS ↓
+     style="display:inline-block;text-align:center;text-decoration:none;color:#9fd1ff;background:#0d0d0d;border:3px double #9fd1ff;font-weight:700;letter-spacing:1px;padding:20px 28px;margin:12px;border-radius:12px;box-shadow:0 0 15px rgba(159,209,255,0.2),inset 0 0 0 2px #0d0d0d;">
+    <img src="./macos.png" alt="macOS" style="display:block;margin:0 auto 12px auto;height:70px;">
+    <span style="font-size:15px;text-transform:uppercase;">DOWNLOAD for macOS ↓</span>
   </a>
 
   <a href="https://github.com/edrdavid1/classic-canvas-forge/releases"
-     style="display:inline-flex;flex-direction:column;align-items:center;padding:14px 22px;margin:6px;text-decoration:none;font-weight:700;letter-spacing:1px;color:#ffffff;background:#111111;border:3px double #ffffff;box-shadow:inset 0 0 0 2px #111111;">
-    <img src="./windows.png" alt="Windows" style="height:60px;margin-bottom:10px;" />
-    DOWNLOAD for Windows ↓
+     style="display:inline-block;text-align:center;text-decoration:none;color:#9fd1ff;background:#0d0d0d;border:3px double #9fd1ff;font-weight:700;letter-spacing:1px;padding:20px 28px;margin:12px;border-radius:12px;box-shadow:0 0 15px rgba(159,209,255,0.2),inset 0 0 0 2px #0d0d0d;">
+    <img src="./windows.png" alt="Windows" style="display:block;margin:0 auto 12px auto;height:70px;">
+    <span style="font-size:15px;text-transform:uppercase;">DOWNLOAD for Windows ↓</span>
   </a>
-  <br/>
-  <small>macOS: portable .app inside zip. Windows: portable .exe available in Releases.</small>
+</p>
+
+<p align="center">
+  <small style="color:#888;">macOS: portable .app inside zip. Windows: portable .exe available in Releases.</small>
 </p>
 
 
