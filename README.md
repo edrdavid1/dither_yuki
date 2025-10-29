@@ -9,29 +9,24 @@
 
 <p align="center">
   <img src="./macos.png" alt="macOS" height="70"><br/>
-  <a href="./downloads/Dither%20Yuki-macOS-portable.zip">
-    <pre style="display:inline-block;text-align:center;background:#0a0a0a;color:#00ffcc;font-family:'Courier New',monospace;padding:6px 12px;border-radius:4px;">
-╔════════════════════════════╗
-║   DOWNLOAD for macOS ↓     ║
-╚════════════════════════════╝
-    </pre>
+  <a href="./downloads/Dither%20Yuki-macOS-portable.zip"
+     style="font-family:'Courier New',monospace;text-decoration:none;color:#00ffcc;background:#0a0a0a;display:inline-block;padding:6px 10px;border:2px solid #00ffcc;border-radius:6px;">
+  ╔════════════════════════════╗<br/>║&nbsp;&nbsp;DOWNLOAD&nbsp;for&nbsp;macOS&nbsp;↓&nbsp;&nbsp;║<br/>╚════════════════════════════╝
   </a>
 </p>
 
 <p align="center">
   <img src="./windows.png" alt="Windows" height="70"><br/>
-  <a href="https://github.com/edrdavid1/classic-canvas-forge/releases">
-    <pre style="display:inline-block;text-align:center;background:#0a0a0a;color:#00aaff;font-family:'Courier New',monospace;padding:6px 12px;border-radius:4px;">
-╔════════════════════════════╗
-║   DOWNLOAD for Windows ↓   ║
-╚════════════════════════════╝
-    </pre>
+  <a href="https://github.com/edrdavid1/classic-canvas-forge/releases"
+     style="font-family:'Courier New',monospace;text-decoration:none;color:#00aaff;background:#0a0a0a;display:inline-block;padding:6px 10px;border:2px solid #00aaff;border-radius:6px;">
+  ╔════════════════════════════╗<br/>║&nbsp;&nbsp;DOWNLOAD&nbsp;for&nbsp;Windows&nbsp;↓&nbsp;&nbsp;║<br/>╚════════════════════════════╝
   </a>
 </p>
 
 <p align="center">
   <small>macOS: portable .app inside zip. Windows: portable .exe available in Releases.</small>
 </p>
+
 
 
 
