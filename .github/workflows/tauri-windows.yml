@@ -33,11 +33,14 @@ jobs:
       - name: Build (Tauri)
         run: npm run tauri:build
 
+      - name: List bundle outputs
+        run: |
+          dir src-tauri\target\release\bundle\windows /s
+
       - name: Upload Windows EXE artifact
         uses: actions/upload-artifact@v4
         with:
           name: dither-yuki-windows-portable
           path: |
-            src-tauri/target/release/bundle/windows/**/Dither Yuki.exe
-            src-tauri/target/release/bundle/windows/**/Dither Yuki/
+            src-tauri/target/release/bundle/windows/**
           if-no-files-found: warn
