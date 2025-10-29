@@ -9,14 +9,14 @@ Free alternative to Dither Boy and Ditherton Pro
 
 <p align="center">
   <img src="./macos.png" alt="macOS" height="70"><br/>
-  <a href="./downloads/Dither.Yuki-macOS-v1.0.0.zip">
+  <a href="[./downloads/Dither.Yuki-macOS-v1.0.0.zip](https://github.com/edrdavid1/dither_yuki/releases/download/v1.0.0/Dither.Yuki-macOS-v1.0.0.zip)">
     🧠 <b>DOWNLOAD for macOS ↓</b>
   </a>
 </p>
 
 <p align="center">
   <img src="./windows.png" alt="Windows" height="70"><br/>
-  <a href="https://github.com/edrdavid1/classic-canvas-forge/releases">
+  <a href="[https://github.com/edrdavid1/classic-canvas-forge/releases](https://github.com/edrdavid1/dither_yuki/releases/download/v1.0.0/Dither.Yuki-Windows-v1.0.0.exe)">
     💾 <b>DOWNLOAD for Windows ↓</b>
   </a>
 </p>
