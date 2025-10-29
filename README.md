@@ -5,7 +5,7 @@
 # Dither Yuki
 
 ## 🖥️ Retro-style image dithering and processing tool  
-*Free alternative to Dither Boy and Ditherton Pro*  
+Free alternative to Dither Boy and Ditherton Pro 
 
 <p align="center">
   <img src="./macos.png" alt="macOS" height="70"><br/>
