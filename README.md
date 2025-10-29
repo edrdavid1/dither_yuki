@@ -9,24 +9,31 @@ Retro-style image dithering and processing tool. Free alternative to Dither Boy 
 <h3 align="center">🖼️ Retro-style image dithering and processing tool</h3>
 <p align="center"><em>Free alternative to Dither Boy and Ditherton Pro</em></p>
 
+<h3 align="center">🖼️ Retro-style image dithering and processing tool</h3>
+<p align="center"><em>Free alternative to Dither Boy and Ditherton Pro</em></p>
+
 <p align="center">
+  <img src="./macos.png" alt="macOS" height="70"><br/>
   <a href="./downloads/Dither%20Yuki-macOS-portable.zip"
-     style="display:inline-block;text-align:center;text-decoration:none;color:#9fd1ff;font-weight:700;letter-spacing:0.5px;padding:16px 24px;margin:12px;border:2px solid #9fd1ff;border-radius:10px;box-shadow:0 0 10px rgba(159,209,255,0.2);background:rgba(13,13,13,0.6);">
-    <img src="./macos.png" alt="macOS" style="display:block;margin:0 auto 10px auto;height:70px;">
-    <span style="font-size:15px;">DOWNLOAD for macOS ↓</span>
+     style="font-family:'Courier New',monospace;white-space:pre;text-decoration:none;color:#00ffcc;background:#0a0a0a;border:none;display:inline-block;padding:8px 16px;margin-top:6px;">
+╔════════════════════╗<br/>
+║   DOWNLOAD for macOS ↓   ║<br/>
+╚════════════════════╝
   </a>
 </p>
 
 <p align="center">
+  <img src="./windows.png" alt="Windows" height="70"><br/>
   <a href="https://github.com/edrdavid1/classic-canvas-forge/releases"
-     style="display:inline-block;text-align:center;text-decoration:none;color:#9fd1ff;font-weight:700;letter-spacing:0.5px;padding:16px 24px;margin:12px;border:2px solid #9fd1ff;border-radius:10px;box-shadow:0 0 10px rgba(159,209,255,0.2);background:rgba(13,13,13,0.6);">
-    <img src="./windows.png" alt="Windows" style="display:block;margin:0 auto 10px auto;height:70px;">
-    <span style="font-size:15px;">DOWNLOAD for Windows ↓</span>
+     style="font-family:'Courier New',monospace;white-space:pre;text-decoration:none;color:#00aaff;background:#0a0a0a;border:none;display:inline-block;padding:8px 16px;margin-top:6px;">
+╔════════════════════╗<br/>
+║   DOWNLOAD for Windows ↓   ║<br/>
+╚════════════════════╝
   </a>
 </p>
 
 <p align="center">
-  <small style="color:#888;">macOS: portable .app inside zip. Windows: portable .exe available in Releases.</small>
+  <small style="color:#777;">macOS: portable .app inside zip. Windows: portable .exe available in Releases.</small>
 </p>
 
 
