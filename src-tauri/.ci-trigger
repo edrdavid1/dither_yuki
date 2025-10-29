@@ -4,3 +4,4 @@ note: harmless file to trigger GitHub Actions workflow
 trigger at 2025-10-29T16:28:44Z
 trigger at 2025-10-29T17:10:16Z
 trigger at 2025-10-29T17:26:31Z (workflow diagnostics)
+trigger at 2025-10-29T17:38:46Z (use latest workflow)
