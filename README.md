@@ -9,28 +9,21 @@
 
 <p align="center">
   <img src="./macos.png" alt="macOS" height="70"><br/>
+  <a href="./downloads/Dither%20Yuki-macOS-portable.zip">
+    🧠 <b>DOWNLOAD for macOS ↓</b>
+  </a>
 </p>
-
-┌──────────────────────────────┐
-│  DOWNLOAD for macOS ↓
-
-│
-└──────────────────────────────┘
-
 
 <p align="center">
   <img src="./windows.png" alt="Windows" height="70"><br/>
+  <a href="https://github.com/edrdavid1/classic-canvas-forge/releases">
+    💾 <b>DOWNLOAD for Windows ↓</b>
+  </a>
 </p>
 
-┌──────────────────────────────┐
-│  DOWNLOAD for Windows ↓
-
-│
-└──────────────────────────────┘
-
-
-macOS: portable `.app` inside zip.  
-Windows: portable `.exe` available in **Releases**.
+<p align="center">
+  <small>macOS: portable <code>.app</code> inside zip.<br/>Windows: portable <code>.exe</code> available in Releases.</small>
+</p>
 
 
 
