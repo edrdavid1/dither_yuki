@@ -77,9 +77,17 @@ Save and reuse your favorite settings for quick workflows.
 
 ### Ready-to-use builds
 
-- **macOS**: [Download v1.0.0 (.zip)](https://github.com/edrdavid1/dither_yuki/releases/download/v1.0.0/Dither.Yuki-macOS-v1.0.0.zip)
-  - Extract the zip and run `Dither Yuki.app`
-  - Portable, no installation required
+- **macOS**: [Download v1.0.0 (.dmg)](https://github.com/edrdavid1/dither_yuki/releases/download/v1.0.0/Dither.Yuki-macOS-v1.0.0.dmg)
+  - Open the DMG and drag `Dither Yuki.app` to your Applications folder.
+  - **Important for macOS users**: Since this is an unsigned app, macOS Gatekeeper may block it or show an error saying the app is **"damaged"**. If you see a warning:
+    1. **Method 1 (Easiest)**: Right-click (or Control-click) `Dither Yuki.app` in your Applications folder and select **Open**. This will show an "Open" button instead of a warning.
+    2. **Method 2 (Fix "Damaged" error)**: If you get a message saying the app is "damaged" and should be moved to Trash, open Terminal and run:
+       ```bash
+       # Remove the quarantine attribute
+       xattr -cr "/Applications/Dither Yuki.app"
+       ```
+       *Note: You can drag and drop the app icon into the terminal window to automatically paste the path.*
+  - Portable DMG format for better reliability.
 
 - **Windows**: [Download v1.0.0 (.exe)](https://github.com/edrdavid1/dither_yuki/releases/download/v1.0.0/Dither.Yuki-Windows-v1.0.0.exe)
   - Portable executable, no installation required

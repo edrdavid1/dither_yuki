@@ -1,0 +1,52 @@
+name: Build macOS DMG (Tauri)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'src/**'
+      - 'src-tauri/**'
+      - 'package.json'
+      - 'package-lock.json'
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (Tauri)
+        run: npm run tauri:build
+
+      - name: Verify build outputs
+        run: |
+          ls -R src-tauri/target/release/bundle/macos/
+
+      - name: Collect DMG
+        run: |
+          mkdir -p dist-macos
+          # Copy DMG to the root and dist-macos
+          cp src-tauri/target/release/bundle/macos/*.dmg "Dither Yuki.dmg"
+          cp src-tauri/target/release/bundle/macos/*.dmg dist-macos/
+
+      - name: Upload macOS DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dither-yuki-macos-dmg
+          path: |
+            Dither Yuki.dmg
+            dist-macos/**
+          if-no-files-found: error
