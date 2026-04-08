@@ -124,6 +124,20 @@ const Index = () => {
         
         // Put processed data back
         ctx.putImageData(imageData, 0, 0);
+
+        // Upscale back to original dimensions using Nearest Neighbor (no smoothing)
+        // so the exported file matches input resolution with sharp pixel blocks
+        let outputCanvas = canvas;
+        if (pixelSize > 1) {
+          outputCanvas = document.createElement('canvas');
+          outputCanvas.width = originalImage.width;
+          outputCanvas.height = originalImage.height;
+          const upCtx = outputCanvas.getContext('2d');
+          if (upCtx) {
+            upCtx.imageSmoothingEnabled = false;
+            upCtx.drawImage(canvas, 0, 0, originalImage.width, originalImage.height);
+          }
+        }
         
         // Create processed image
         const processedImg = new Image();
@@ -132,7 +146,7 @@ const Index = () => {
           setShowOriginal(false);
           setStatus("Ready");
         };
-        processedImg.src = canvas.toDataURL();
+        processedImg.src = outputCanvas.toDataURL();
       } catch (error) {
         console.error("Error applying filter:", error);
         toast.error("Failed to apply filter");
