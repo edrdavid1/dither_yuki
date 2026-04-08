@@ -3,6 +3,8 @@ name: Build macOS DMG (Tauri)
 on:
   workflow_dispatch:
   push:
+    tags:
+      - 'v*'
     paths:
       - 'src/**'
       - 'src-tauri/**'
@@ -15,6 +17,8 @@ env:
 jobs:
   build-macos:
     runs-on: macos-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,24 +43,22 @@ jobs:
           APP_PATH="src-tauri/target/release/bundle/macos/Dither Yuki.app"
           codesign --deep --force --sign - "$APP_PATH"
 
-      - name: Verify build outputs
-        run: |
-          ls -R src-tauri/target/release/bundle/macos/
-
       - name: Collect DMG
         run: |
-          mkdir -p dist-macos
-          # Re-create DMG after ad-hoc signing
           hdiutil create -volname "Dither Yuki" \
             -srcfolder "src-tauri/target/release/bundle/macos/Dither Yuki.app" \
             -ov -format UDZO "Dither Yuki.dmg"
-          cp "Dither Yuki.dmg" dist-macos/
 
       - name: Upload macOS DMG artifact
         uses: actions/upload-artifact@v4
         with:
           name: dither-yuki-macos-dmg
-          path: |
-            Dither Yuki.dmg
-            dist-macos/**
+          path: Dither Yuki.dmg
           if-no-files-found: error
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Dither Yuki.dmg
+          generate_release_notes: true
