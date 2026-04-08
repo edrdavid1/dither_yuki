@@ -22,7 +22,7 @@ Free alternative to Dither Boy and Ditherton Pro
 </p>
 
 <p align="center">
-  <small>macOS: portable <code>.app</code> inside zip.<br/>Windows: portable <code>.exe</code> available in Releases.</small>
+  <small>macOS: <code>.dmg</code> inside zip.<br/>Windows: portable <code>.exe</code> available in Releases.</small>
 </p>
 
 
