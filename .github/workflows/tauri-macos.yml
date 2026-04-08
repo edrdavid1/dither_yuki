@@ -31,6 +31,11 @@ jobs:
       - name: Build (Tauri)
         run: npm run tauri:build
 
+      - name: Ad-hoc code sign (allows "Open Anyway" on macOS)
+        run: |
+          APP_PATH="src-tauri/target/release/bundle/macos/Dither Yuki.app"
+          codesign --deep --force --sign - "$APP_PATH"
+
       - name: Verify build outputs
         run: |
           ls -R src-tauri/target/release/bundle/macos/
@@ -38,9 +43,11 @@ jobs:
       - name: Collect DMG
         run: |
           mkdir -p dist-macos
-          # Copy DMG to the root and dist-macos
-          cp src-tauri/target/release/bundle/macos/*.dmg "Dither Yuki.dmg"
-          cp src-tauri/target/release/bundle/macos/*.dmg dist-macos/
+          # Re-create DMG after ad-hoc signing
+          hdiutil create -volname "Dither Yuki" \
+            -srcfolder "src-tauri/target/release/bundle/macos/Dither Yuki.app" \
+            -ov -format UDZO "Dither Yuki.dmg"
+          cp "Dither Yuki.dmg" dist-macos/
 
       - name: Upload macOS DMG artifact
         uses: actions/upload-artifact@v4
