@@ -9,7 +9,7 @@ Free alternative to Dither Boy and Ditherton Pro
 
 <p align="center">
   <img src="./macos.png" alt="macOS" height="70"><br/>
-  <a href="https://github.com/edrdavid1/dither_yuki/releases/download/v1.0.0/Dither.Yuki-macOS-v1.0.0.zip">
+  <a href="https://github.com/edrdavid1/dither_yuki/releases/download/v1.0.0/dither-yuki-macos-dmg.zip">
     <b>DOWNLOAD for macOS ↓</b>
   </a>
 </p>
