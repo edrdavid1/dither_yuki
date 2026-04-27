@@ -5,7 +5,10 @@ pub mod error_diffusion;
 pub mod ordered;
 
 pub use types::{Effect, ImageData, EffectParams, EffectResult};
-pub use error_diffusion::{FloydSteinberg, Atkinson};
+pub use error_diffusion::{
+    FloydSteinberg, Atkinson, JarvisJudiceNinke, Sierra, Stucki, Burkes,
+    TwoRowSierra, FalseFloydSteinberg, ShiauFan,
+};
 pub use ordered::BayerDither;
 
 /// Algorithm registry for creating effects by name
@@ -18,8 +21,17 @@ impl AlgorithmRegistry {
         intensity: f32,
     ) -> Result<Box<dyn Effect>, String> {
         match algorithm {
+            // Error Diffusion algorithms
             "Floyd-Steinberg" => Ok(Box::new(FloydSteinberg { palette, intensity })),
             "Atkinson" => Ok(Box::new(Atkinson { palette, intensity })),
+            "Jarvis-Judice-Ninke" => Ok(Box::new(JarvisJudiceNinke { palette, intensity })),
+            "Sierra" => Ok(Box::new(Sierra { palette, intensity })),
+            "Stucki" => Ok(Box::new(Stucki { palette, intensity })),
+            "Burkes" => Ok(Box::new(Burkes { palette, intensity })),
+            "Two-Row Sierra" => Ok(Box::new(TwoRowSierra { palette, intensity })),
+            "False Floyd-Steinberg" => Ok(Box::new(FalseFloydSteinberg { palette, intensity })),
+            "Shiau Fan" => Ok(Box::new(ShiauFan { palette, intensity })),
+            // Ordered dithering algorithms
             "Bayer 2x2" => Ok(Box::new(BayerDither {
                 size: 2,
                 palette,
@@ -32,6 +44,23 @@ impl AlgorithmRegistry {
             })),
             _ => Err(format!("Unknown algorithm: {}", algorithm)),
         }
+    }
+
+    /// List all available algorithms
+    pub fn list_all() -> Vec<&'static str> {
+        vec![
+            "Floyd-Steinberg",
+            "Atkinson",
+            "Jarvis-Judice-Ninke",
+            "Sierra",
+            "Stucki",
+            "Burkes",
+            "Two-Row Sierra",
+            "False Floyd-Steinberg",
+            "Shiau Fan",
+            "Bayer 2x2",
+            "Bayer 4x4",
+        ]
     }
 }
 
