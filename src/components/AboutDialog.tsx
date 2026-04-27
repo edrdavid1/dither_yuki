@@ -21,8 +21,8 @@ export const AboutDialog = ({ onClose }: AboutDialogProps) => {
           <div className="text-center space-y-2">
             <img src="/dithered_1761731869443.png" alt="Dithertone Yuki" className="w-24 h-24 mx-auto" />
             <h2 className="text-2xl font-bold">Dither Yuki</h2>
-            <p className="text-sm text-muted-foreground">Version 1.0.0</p>
-            <p className="text-xs text-muted-foreground">Developer: L'eco di Bergamo¹</p>
+            <p className="text-sm text-muted-foreground">Version 1.0.2</p>
+            <p className="text-xs text-muted-foreground">Developer: MD</p>
           </div>
           
           <div className="space-y-2 text-sm">

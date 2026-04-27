@@ -32,7 +32,7 @@ export const PaletteEditor = ({ onSave, onClose, initialColors = ["#000000", "#F
         setColors(colors.slice(0, colorSteps));
       }
     }
-  }, [colorSteps]);
+  }, [colorSteps, colors]);
 
   const handleColorChange = (index: number, color: string) => {
     const newColors = [...colors];

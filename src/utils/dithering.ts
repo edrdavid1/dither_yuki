@@ -539,7 +539,7 @@ export function applySharpness(imageData: ImageData, amount: number): ImageData 
 
   // Copy edges
   for (let x = 0; x < width; x++) {
-    for (let y of [0, height - 1]) {
+    for (const y of [0, height - 1]) {
       const idx = (y * width + x) * 4;
       output.data[idx] = data[idx];
       output.data[idx + 1] = data[idx + 1];
@@ -548,7 +548,7 @@ export function applySharpness(imageData: ImageData, amount: number): ImageData 
     }
   }
   for (let y = 0; y < height; y++) {
-    for (let x of [0, width - 1]) {
+    for (const x of [0, width - 1]) {
       const idx = (y * width + x) * 4;
       output.data[idx] = data[idx];
       output.data[idx + 1] = data[idx + 1];

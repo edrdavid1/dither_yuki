@@ -1,3 +1,8 @@
+mod image_engine;
+mod commands;
+
+use commands::{process_image, list_algorithms, list_palettes};
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
@@ -11,6 +16,11 @@ pub fn run() {
       }
       Ok(())
     })
+    .invoke_handler(tauri::generate_handler![
+      process_image,
+      list_algorithms,
+      list_palettes
+    ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }

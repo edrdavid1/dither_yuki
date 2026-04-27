@@ -1,5 +1,4 @@
-import { useState, useRef, useEffect } from "react";
-import { Window } from "@/components/Window";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { MenuBar } from "@/components/MenuBar";
 import { Toolbar } from "@/components/Toolbar";
 import { ControlPanel } from "@/components/ControlPanel";
@@ -9,8 +8,49 @@ import { PaletteEditor } from "@/components/PaletteEditor";
 import { AboutDialog } from "@/components/AboutDialog";
 import { ShortcutsDialog } from "@/components/ShortcutsDialog";
 import { PresetManager } from "@/components/PresetManager";
-import { applyDithering, adjustImage, applyPixelScale, applyBlur, applySharpness, applyNoise, setCustomPalette, DitheringAlgorithm, ColorPalette } from "@/utils/dithering";
+import { setCustomPalette, DitheringAlgorithm, ColorPalette } from "@/utils/dithering";
+import { createDefaultPipeline, runImagePipeline } from "@/core/pipeline";
 import { toast } from "sonner";
+
+interface PresetSettings {
+  algorithm: string;
+  palette: string;
+  intensity: number;
+  contrast: number;
+  brightness: number;
+  saturation: number;
+  pixelSize: number;
+  blur: number;
+  sharpness: number;
+  noise: number;
+}
+
+interface PresetPayload {
+  settings: PresetSettings;
+}
+
+const DITHERING_ALGORITHMS: DitheringAlgorithm[] = [
+  "Floyd-Steinberg",
+  "Jarvis-Judice-Ninke",
+  "Sierra",
+  "Atkinson",
+  "Ordered",
+  "Bayer 2x2",
+  "Bayer 4x4",
+  "Bayer 8x8",
+  "Random",
+];
+
+const COLOR_PALETTES: ColorPalette[] = [
+  "Grayscale",
+  "CGA",
+  "EGA",
+  "Gameboy",
+  "C64",
+  "ZX Spectrum",
+  "Apple II",
+  "Custom",
+];
 
 const Index = () => {
   const [algorithm, setAlgorithm] = useState<DitheringAlgorithm>("Floyd-Steinberg");
@@ -36,18 +76,9 @@ const Index = () => {
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Auto-apply filter when any parameter changes
-  useEffect(() => {
-    if (originalImage) {
-      handleApplyFilter();
-    }
-  }, [algorithm, palette, intensity, contrast, brightness, saturation, pixelSize, blur, sharpness, noise]);
-
-  
-
-  const handleOpenFile = () => {
+  const handleOpenFile = useCallback(() => {
     fileInputRef.current?.click();
-  };
+  }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -67,7 +98,7 @@ const Index = () => {
     reader.readAsDataURL(file);
   };
 
-  const handleApplyFilter = () => {
+  const handleApplyFilter = useCallback(() => {
     if (!originalImage) {
       toast.error("Please load an image first!");
       return;
@@ -94,33 +125,25 @@ const Index = () => {
         // Get image data
         let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         
-        // Apply blur
-        if (blur > 0) {
-          imageData = applyBlur(imageData, blur);
-        }
-        
-        // Apply adjustments
-        imageData = adjustImage(imageData, contrast, brightness, saturation);
-        
-        // Apply sharpness
-        if (sharpness > 0) {
-          imageData = applySharpness(imageData, sharpness);
-        }
-        
-        // Apply noise
-        if (noise > 0) {
-          imageData = applyNoise(imageData, noise);
-        }
-        
-        // Apply pixel scale
+        const pipeline = createDefaultPipeline({
+          algorithm,
+          palette,
+          intensity,
+          contrast,
+          brightness,
+          saturation,
+          pixelSize,
+          blur,
+          sharpness,
+          noise,
+        });
+
+        imageData = runImagePipeline(imageData, pipeline);
+
         if (pixelSize > 1) {
-          imageData = applyPixelScale(imageData, pixelSize);
           canvas.width = imageData.width;
           canvas.height = imageData.height;
         }
-        
-        // Apply dithering
-        imageData = applyDithering(imageData, algorithm, palette, intensity);
         
         // Put processed data back
         ctx.putImageData(imageData, 0, 0);
@@ -153,9 +176,16 @@ const Index = () => {
         setStatus("Error");
       }
     }, 100);
-  };
+  }, [algorithm, blur, brightness, contrast, intensity, noise, originalImage, palette, pixelSize, saturation, sharpness]);
 
-  const handleReset = () => {
+  // Auto-apply filter when any parameter changes
+  useEffect(() => {
+    if (originalImage) {
+      handleApplyFilter();
+    }
+  }, [handleApplyFilter, originalImage]);
+
+  const handleReset = useCallback(() => {
     setProcessedImage(null);
     setShowOriginal(true);
     setIntensity(100);
@@ -167,9 +197,9 @@ const Index = () => {
     setSharpness(0);
     setNoise(0);
     setStatus("Ready");
-  };
+  }, []);
 
-  const handleSave = () => {
+  const handleSave = useCallback(() => {
     const imageToSave = processedImage || originalImage;
     if (!imageToSave) {
       toast.error("No image to save!");
@@ -194,13 +224,23 @@ const Index = () => {
         }
       });
     }
-  };
+  }, [originalImage, processedImage]);
 
-  const handleExport = handleSave;
+  const handleExport = useCallback(() => {
+    handleSave();
+  }, [handleSave]);
 
-  const handleLoadPreset = (preset: any) => {
-    setAlgorithm(preset.settings.algorithm);
-    setPalette(preset.settings.palette);
+  const handleLoadPreset = (preset: PresetPayload) => {
+    const nextAlgorithm = DITHERING_ALGORITHMS.includes(preset.settings.algorithm as DitheringAlgorithm)
+      ? (preset.settings.algorithm as DitheringAlgorithm)
+      : "Floyd-Steinberg";
+
+    const nextPalette = COLOR_PALETTES.includes(preset.settings.palette as ColorPalette)
+      ? (preset.settings.palette as ColorPalette)
+      : "Grayscale";
+
+    setAlgorithm(nextAlgorithm);
+    setPalette(nextPalette);
     setIntensity(preset.settings.intensity);
     setContrast(preset.settings.contrast);
     setBrightness(preset.settings.brightness);
@@ -245,7 +285,7 @@ const Index = () => {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [handleSave, handleExport]);
+  }, [handleExport, handleOpenFile, handleReset, handleSave]);
 
   return (
     <div className="h-screen bg-background flex flex-col overflow-hidden">
