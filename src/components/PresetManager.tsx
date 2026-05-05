@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, Save, Trash2 } from "lucide-react";
+import { ArrowDownBox, Delete } from "pixelarticons/react";
 import { toast } from "sonner";
 
 interface Preset {
@@ -80,11 +80,11 @@ export const PresetManager = ({ currentSettings, onClose, onLoadPreset }: Preset
             onClick={onClose}
             className="bg-card px-2 text-xs border border-win95-light hover:bg-muted"
           >
-            <X size={12} />
+            <Delete className="h-3 w-3" />
           </button>
         </div>
         
-        <div className="p-4 space-y-4 overflow-y-auto">
+        <div className="p-4 space-y-4 overflow-y-auto win98-scroll">
           {/* Save New Preset */}
           <div className="win95-panel p-3 space-y-2">
             <div className="font-bold text-sm border-b-2 border-win95-dark pb-1 mb-2">
@@ -102,7 +102,7 @@ export const PresetManager = ({ currentSettings, onClose, onLoadPreset }: Preset
                 />
                 <div className="flex gap-2">
                   <button onClick={handleSavePreset} className="win95-button flex-1 flex items-center justify-center gap-2">
-                    <Save size={14} />
+                    <ArrowDownBox className="h-3.5 w-3.5" />
                     Save
                   </button>
                   <button onClick={() => setShowSaveDialog(false)} className="win95-button flex-1">
@@ -127,7 +127,7 @@ export const PresetManager = ({ currentSettings, onClose, onLoadPreset }: Preset
                 No presets saved yet
               </p>
             ) : (
-              <div className="space-y-2 max-h-[300px] overflow-y-auto">
+              <div className="space-y-2 max-h-[300px] overflow-y-auto win98-scroll">
                 {presets.map((preset, index) => (
                   <div key={index} className="win95-border-inset p-2 bg-background flex items-center justify-between gap-2">
                     <div className="flex-1">
@@ -148,7 +148,7 @@ export const PresetManager = ({ currentSettings, onClose, onLoadPreset }: Preset
                         className="win95-button p-1"
                         title="Delete"
                       >
-                        <Trash2 size={14} />
+                        <Delete className="h-3.5 w-3.5" />
                       </button>
                     </div>
                   </div>

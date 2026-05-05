@@ -2,70 +2,73 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
-All colors MUST be HSL.
-*/
-
 @layer base {
   :root {
-    /* Windows 95 Classic Color Scheme */
-    --background: 0 0% 75%; /* #C0C0C0 - Classic Windows gray */
-    --foreground: 0 0% 0%; /* Black text */
+    --background: 0 0% 75%;
+    --foreground: 0 0% 25%;
 
-    --card: 40 8% 80%; /* #D4D0C8 - Panel color */
-    --card-foreground: 0 0% 0%;
+    --card: 0 0% 75%;
+    --card-foreground: 0 0% 25%;
 
-    --popover: 40 8% 80%;
-    --popover-foreground: 0 0% 0%;
+    --popover: 0 0% 75%;
+    --popover-foreground: 0 0% 25%;
 
-    --primary: 240 100% 25%; /* #000080 - Windows blue */
-    --primary-foreground: 0 0% 100%; /* White */
+    --primary: 224 68% 34%;
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 0 0% 88%; /* #E0E0E0 - Light panel */
-    --secondary-foreground: 0 0% 0%;
+    --secondary: 0 0% 75%;
+    --secondary-foreground: 0 0% 25%;
 
-    --muted: 0 0% 88%;
-    --muted-foreground: 0 0% 40%;
+    --muted: 0 0% 75%;
+    --muted-foreground: 0 0% 50%;
 
-    --accent: 220 100% 50%; /* #0055FF - Bright blue */
+    --accent: 18 72% 42%;
     --accent-foreground: 0 0% 100%;
 
-    --destructive: 0 100% 50%; /* Bright red */
+    --destructive: 0 84% 48%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 0 0% 50%; /* Dark gray for borders */
-    --input: 0 0% 100%; /* White input background */
-    --ring: 240 100% 25%;
+    --border: 0 0% 50%;
+    --input: 0 0% 100%;
+    --ring: 224 68% 34%;
+    --radius: 0rem;
 
-    --radius: 0rem; /* No rounded corners - pure retro */
-
-    /* Windows 95 3D effect colors */
-    --win95-light: 0 0% 100%; /* White highlight */
-    --win95-dark: 0 0% 25%; /* Dark shadow */
-    --win95-face: 40 8% 80%; /* Button face */
-    --win95-shadow: 0 0% 50%; /* Medium shadow */
+    --win95-light: 0 0% 100%;
+    --win95-dark: 0 0% 25%;
+    --win95-face: 0 0% 75%;
+    --win95-shadow: 0 0% 50%;
   }
-}
 
-@layer base {
   * {
     @apply border-border;
   }
 
+  html,
+  body,
+  #root {
+    width: 100vw;
+    height: 100vh;
+    min-width: 900px;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow-x: hidden;
+    box-sizing: border-box;
+  }
+
   body {
     @apply bg-background text-foreground font-tahoma;
+    background-image: none;
   }
 }
 
-/* Windows 95 UI Elements */
 @layer components {
   .win95-border {
-    border: 2px solid;
+    border: 1px solid;
     border-color: hsl(var(--win95-light)) hsl(var(--win95-dark)) hsl(var(--win95-dark)) hsl(var(--win95-light));
   }
 
   .win95-border-inset {
-    border: 2px solid;
+    border: 1px solid;
     border-color: hsl(var(--win95-dark)) hsl(var(--win95-light)) hsl(var(--win95-light)) hsl(var(--win95-dark));
   }
 
@@ -73,10 +76,186 @@ All colors MUST be HSL.
     @apply bg-card win95-border p-2;
   }
 
-  .win95-button {
-    @apply bg-card px-6 py-2 font-bold text-foreground;
-    border: 2px solid;
+  .win98-desktop {
+    @apply min-h-screen;
+    width: 100vw;
+    height: 100dvh;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: hsl(var(--background));
+    box-sizing: border-box;
+  }
+
+  .win98-shell {
+    @apply flex h-full min-h-0 flex-col overflow-hidden win95-window;
+    box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.16);
+  }
+
+  .win98-surface {
+    @apply bg-card;
+    box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.35);
+  }
+
+  .win98-toolbar {
+    @apply bg-card px-2 py-1 border-y border-win95-dark flex items-center gap-2 font-mono text-[11px];
+  }
+
+  .win98-badge {
+    @apply inline-flex items-center gap-1 px-2 py-1 text-[11px] font-bold uppercase tracking-wide font-mono;
+    border: 1px solid;
     border-color: hsl(var(--win95-light)) hsl(var(--win95-dark)) hsl(var(--win95-dark)) hsl(var(--win95-light));
+    background: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+  }
+
+  .win98-card {
+    @apply win95-panel space-y-2;
+    box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.35);
+  }
+
+  .win98-section-title {
+    @apply text-[11px] font-bold uppercase tracking-[0.12em] text-muted-foreground;
+  }
+
+  .win98-stat-value {
+    @apply text-sm font-bold text-foreground;
+  }
+
+  .win98-divider {
+    @apply h-px bg-win95-dark/40;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
+  }
+
+  .retro-divider {
+    border-top: 1px solid #808080;
+    box-shadow: 0 1px 0 #ffffff;
+  }
+
+  .win98-workspace-grid {
+    @apply grid h-full min-h-0 grid-rows-[minmax(0,1fr)] gap-2 xl:grid-cols-[320px_minmax(0,1fr)];
+  }
+
+  .win98-workspace-grid-3col {
+    display: grid;
+    height: 100%;
+    min-height: 0;
+    width: 100vw;
+    gap: 0;
+    grid-template-columns: 280px minmax(0, 1fr) 340px;
+    box-sizing: border-box;
+  }
+
+  .win98-workspace-grid-2col {
+    display: grid;
+    height: 100%;
+    min-height: 0;
+    width: 100vw;
+    gap: 0;
+    grid-template-columns: minmax(0, 1fr) 340px;
+    box-sizing: border-box;
+  }
+
+  .win98-scroll {
+    scrollbar-width: auto;
+    scrollbar-color: hsl(var(--win95-shadow)) hsl(var(--card));
+    scrollbar-gutter: stable both-edges;
+  }
+
+  .win98-scroll::-webkit-scrollbar {
+    width: 16px;
+    height: 16px;
+    background: hsl(var(--card));
+  }
+
+  .win98-scroll::-webkit-scrollbar-track {
+    background: hsl(var(--card));
+    background-image:
+      linear-gradient(45deg, rgba(255, 255, 255, 0.22) 25%, transparent 25%, transparent 50%, rgba(255, 255, 255, 0.22) 50%, rgba(255, 255, 255, 0.22) 75%, transparent 75%, transparent);
+    background-size: 4px 4px;
+    box-shadow: inset 1px 1px 0 hsl(var(--win95-shadow));
+  }
+
+  .win98-scroll::-webkit-scrollbar-track:vertical {
+    border-left: 1px solid hsl(var(--win95-shadow));
+  }
+
+  .win98-scroll::-webkit-scrollbar-track:horizontal {
+    border-top: 1px solid hsl(var(--win95-shadow));
+  }
+
+  .win98-scroll::-webkit-scrollbar-thumb {
+    background: hsl(var(--win95-face));
+    border: 1px solid hsl(var(--win95-dark));
+    box-shadow:
+      inset 1px 1px 0 hsl(var(--win95-light)),
+      inset -1px -1px 0 hsl(var(--win95-dark));
+    min-height: 28px;
+    min-width: 28px;
+  }
+
+  .win98-scroll::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--secondary));
+  }
+
+  .win98-scroll::-webkit-scrollbar-thumb:active {
+    box-shadow:
+      inset 1px 1px 0 hsl(var(--win95-dark)),
+      inset -1px -1px 0 hsl(var(--win95-light));
+  }
+
+  .win98-scroll::-webkit-scrollbar-button {
+    display: block;
+    background-color: hsl(var(--win95-face));
+    background-position: center;
+    background-repeat: no-repeat;
+    border: 1px solid hsl(var(--win95-dark));
+    box-shadow:
+      inset 1px 1px 0 hsl(var(--win95-light)),
+      inset -1px -1px 0 hsl(var(--win95-dark));
+  }
+
+  .win98-scroll::-webkit-scrollbar-button:active {
+    box-shadow:
+      inset 1px 1px 0 hsl(var(--win95-dark)),
+      inset -1px -1px 0 hsl(var(--win95-light));
+  }
+
+  .win98-scroll::-webkit-scrollbar-button:single-button:vertical:decrement {
+    height: 16px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath d='M4 1 7 5H1z' fill='black'/%3E%3C/svg%3E");
+  }
+
+  .win98-scroll::-webkit-scrollbar-button:single-button:vertical:increment {
+    height: 16px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath d='M1 3h6L4 7z' fill='black'/%3E%3C/svg%3E");
+  }
+
+  .win98-scroll::-webkit-scrollbar-button:single-button:horizontal:decrement {
+    width: 16px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath d='M1 4 5 1v6z' fill='black'/%3E%3C/svg%3E");
+  }
+
+  .win98-scroll::-webkit-scrollbar-button:single-button:horizontal:increment {
+    width: 16px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath d='M3 1v6l4-3z' fill='black'/%3E%3C/svg%3E");
+  }
+
+  .win98-scroll::-webkit-scrollbar-corner {
+    background: hsl(var(--win95-face));
+    box-shadow:
+      inset 1px 1px 0 hsl(var(--win95-light)),
+      inset -1px -1px 0 hsl(var(--win95-dark));
+  }
+
+  .win98-empty-state {
+    @apply flex h-full min-h-[320px] flex-col items-center justify-center gap-2 text-center text-sm text-muted-foreground;
+  }
+
+  .win95-button {
+    @apply bg-card px-3 py-1.5 font-bold text-foreground;
+    border: 1px solid;
+    border-color: hsl(var(--win95-light)) hsl(var(--win95-dark)) hsl(var(--win95-dark)) hsl(var(--win95-light));
+    box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.3);
   }
 
   .win95-button:active {
@@ -88,18 +267,67 @@ All colors MUST be HSL.
     @apply text-muted-foreground cursor-not-allowed;
   }
 
+  .win98-icon-button {
+    @apply inline-flex items-center justify-center p-0;
+    width: 22px;
+    height: 22px;
+    min-width: 22px;
+    min-height: 22px;
+  }
+
+  .win98-icon-separator {
+    width: 1px;
+    height: 16px;
+    background: hsl(var(--win95-dark));
+    box-shadow: 1px 0 0 hsl(var(--win95-light));
+    opacity: 0.7;
+  }
+
   .win95-window {
     @apply bg-card;
-    border: 2px solid;
+    border: 1px solid;
     border-color: hsl(var(--win95-light)) hsl(var(--win95-dark)) hsl(var(--win95-dark)) hsl(var(--win95-light));
   }
 
   .win95-titlebar {
-    @apply bg-primary text-primary-foreground px-1 py-1 font-bold flex items-center justify-between;
+    @apply bg-primary text-primary-foreground px-2 py-1 font-bold flex items-center justify-between;
   }
 
   .win95-input {
-    @apply bg-input border-2 px-2 py-1;
+    @apply bg-input border px-2 py-1;
     border-color: hsl(var(--win95-dark)) hsl(var(--win95-light)) hsl(var(--win95-light)) hsl(var(--win95-dark));
+  }
+
+  .react95-window-header {
+    @apply mb-2 flex items-center justify-between gap-2 bg-primary px-2 py-1 text-[12px] font-bold text-primary-foreground;
+  }
+
+  .preview-controlbar {
+    @apply px-1.5 py-1 text-[11px] items-center;
+    min-height: 34px;
+    background: hsl(var(--card));
+  }
+
+  .win95-input:focus,
+  .win95-input:focus-visible {
+    border-color: hsl(var(--accent));
+    outline: none;
+    box-shadow: none;
+  }
+
+  .inspector-borderless .win98-card,
+  .inspector-borderless .win95-button,
+  .inspector-borderless .win95-input,
+  .inspector-borderless [class*="win95-border"] {
+    border: none !important;
+    box-shadow: none !important;
+  }
+
+  .inspector-borderless [role="combobox"],
+  .inspector-borderless button,
+  .inspector-borderless input,
+  .inspector-borderless select {
+    border-color: transparent !important;
+    outline: none;
   }
 }

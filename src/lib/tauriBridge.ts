@@ -1,0 +1,77 @@
+export async function safeTauriInvoke<T>(command: string, args?: Record<string, unknown>): Promise<T | null> {
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return await invoke<T>(command, args);
+  } catch (error) {
+    console.warn(`[tauriBridge] invoke failed: ${command}`, error);
+    return null;
+  }
+}
+
+export interface ProcessImageResult {
+  width: number;
+  height: number;
+  /** Processed RGBA pixel data as a flat number array (width × height × 4). */
+  rgba: number[];
+}
+
+export interface ExportSvgRequest {
+  name?: string;
+  width: number;
+  height: number;
+  frame: number[];
+  pixel_size?: number;
+  shape?: "square" | "circle";
+  include_transparent?: boolean;
+}
+
+export interface ExportSvgResponse {
+  file_name: string;
+  file_extension: string;
+  bytes: number[];
+}
+
+/**
+ * Send raw RGBA pixels through the Rust image pipeline and return processed RGBA.
+ *
+ * @param width  - source image width in pixels
+ * @param height - source image height in pixels
+ * @param rgbaBytes - raw RGBA data (width × height × 4 bytes)
+ * @param layers - ordered EffectLayer array (same shape as the video pipeline)
+ */
+export async function getBackendPreview(
+  width: number,
+  height: number,
+  rgbaBytes: Uint8Array,
+  layers: unknown[],
+): Promise<ProcessImageResult | null> {
+  return safeTauriInvoke<ProcessImageResult>("process_image", {
+    request: {
+      width,
+      height,
+      image_bytes: Array.from(rgbaBytes),
+      layers,
+    },
+  });
+}
+
+export async function exportSvgFrame(request: ExportSvgRequest): Promise<ExportSvgResponse | null> {
+  return safeTauriInvoke<ExportSvgResponse>("export_svg", { request });
+}
+
+export async function saveSvgWithDialog(fileName: string, bytes: number[]): Promise<string | null> {
+  const selectedPath = await safeTauriInvoke<string | null>("plugin:dialog|save", {
+    title: "Save SVG",
+    defaultPath: fileName,
+    filters: [{ name: "SVG", extensions: ["svg"] }],
+  });
+
+  if (!selectedPath) {
+    return null;
+  }
+
+  return safeTauriInvoke<string>("save_bytes_to_path", {
+    filePath: selectedPath,
+    bytes,
+  });
+}

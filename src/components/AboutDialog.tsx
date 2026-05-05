@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { Delete } from "pixelarticons/react";
 
 interface AboutDialogProps {
   onClose: () => void;
@@ -14,15 +14,15 @@ export const AboutDialog = ({ onClose }: AboutDialogProps) => {
             onClick={onClose}
             className="bg-card px-2 text-xs border border-win95-light hover:bg-muted"
           >
-            <X size={12} />
+            <Delete className="h-3 w-3" />
           </button>
         </div>
-        <div className="p-6 space-y-4 flex-1 overflow-y-auto">
+        <div className="p-6 space-y-4 flex-1 overflow-y-auto win98-scroll">
           <div className="text-center space-y-2">
             <img src="/dithered_1761731869443.png" alt="Dithertone Yuki" className="w-24 h-24 mx-auto" />
             <h2 className="text-2xl font-bold">Dither Yuki</h2>
             <p className="text-sm text-muted-foreground">Version 1.0.2</p>
-            <p className="text-xs text-muted-foreground">Developer: MD</p>
+            <p className="text-xs text-muted-foreground">Developer: L&apos;eco non di Bergamo.&sup1;</p>
           </div>
           
           <div className="space-y-2 text-sm">
@@ -56,6 +56,21 @@ export const AboutDialog = ({ onClose }: AboutDialogProps) => {
                 <p>4. <span className="font-semibold">Warranty Disclaimer</span><br/>
                 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
                 IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM THE USE OR DISTRIBUTION OF THE SOFTWARE.</p>
+              </div>
+            </div>
+
+            <div className="pt-4 border-t-2 border-win95-dark">
+              <p className="font-bold mb-2">Icon attribution:</p>
+              <div className="text-xs text-muted-foreground space-y-1 p-2 bg-win95-light">
+                <p>
+                  Some toolbar icons are from Streamline Pixel (Free, CC BY 4.0).
+                </p>
+                <p>
+                  Credits: <a className="underline" href="https://streamlinehq.com" target="_blank" rel="noreferrer">Free icons from Streamline</a>
+                </p>
+                <p>
+                  License: <a className="underline" href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">CC BY 4.0</a>
+                </p>
               </div>
             </div>
           </div>

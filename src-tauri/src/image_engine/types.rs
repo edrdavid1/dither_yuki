@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::context::FrameContext;
+
 /// Raw image data in RGBA format
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImageData {
@@ -61,7 +63,7 @@ impl ImageData {
 
 /// Effect trait — all effects implement this
 pub trait Effect: Send + Sync {
-    fn apply(&self, image: &mut ImageData) -> Result<(), String>;
+    fn apply(&self, image: &mut ImageData, ctx: &FrameContext) -> Result<(), String>;
     fn name(&self) -> &str;
 }
 

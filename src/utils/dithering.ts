@@ -1,6 +1,7 @@
 // Dithering algorithms for image processing
 
 export type DitheringAlgorithm = 
+  | "None"
   | "Floyd-Steinberg"
   | "Jarvis-Judice-Ninke"
   | "Sierra"
@@ -111,6 +112,10 @@ const palettes: Record<ColorPalette, number[][]> = {
   "Custom": [[0, 0, 0], [255, 255, 255]]
 };
 
+export function getPaletteColors(palette: ColorPalette): number[][] {
+  return (palettes[palette] ?? []).map((color) => [color[0], color[1], color[2]]);
+}
+
 export function setCustomPalette(hexColors: string[]) {
   palettes["Custom"] = hexColors.map(hex => {
     const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
@@ -143,9 +148,12 @@ export function applyDithering(
   imageData: ImageData,
   algorithm: DitheringAlgorithm,
   paletteType: ColorPalette,
-  intensity: number = 100
+  intensity: number = 100,
+  customPalette?: [number, number, number][]
 ): ImageData {
-  const palette = palettes[paletteType];
+  const palette = paletteType === "Custom" && customPalette && customPalette.length > 0
+    ? customPalette
+    : palettes[paletteType];
   const { width, height, data } = imageData;
   const output = new ImageData(width, height);
   
@@ -155,6 +163,10 @@ export function applyDithering(
   }
 
   const intensityFactor = intensity / 100;
+
+  if (algorithm === "None") {
+    return output;
+  }
 
   if (algorithm === "Floyd-Steinberg") {
     return floydSteinberg(output, palette, intensityFactor);
@@ -573,6 +585,254 @@ export function applyNoise(imageData: ImageData, amount: number): ImageData {
   }
 
   return imageData;
+}
+
+type FrontendGlitchParams = {
+  glitchType: "None" | "Pixel Sort" | "Block Noise" | "RGB Shift" | "Slice" | "Analog";
+  pixelSortMetric: "luma" | "saturation" | "hue" | "rgb-sum";
+  pixelSortMask: "all" | "dark" | "light";
+  thresholdMin: number;
+  thresholdMax: number;
+  angle: number;
+  sortLength: number;
+  blockSize: number;
+  chaos: number;
+  quantization: number;
+  redShiftX: number;
+  redShiftY: number;
+  greenShiftX: number;
+  greenShiftY: number;
+  blueShiftX: number;
+  blueShiftY: number;
+  globalRgbShiftIntensity: number;
+  sliceCount: number;
+  maxOffset: number;
+  randomness: number;
+  scanlineThickness: number;
+  scanlineGap: number;
+  flicker: number;
+  curvature: number;
+  snapGlitchToPalette: boolean;
+  paletteMix: number;
+  globalSeed: number;
+};
+
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+
+function seededNoise(seed: number, x: number, y: number): number {
+  const value = Math.sin((x + 1) * 12.9898 + (y + 1) * 78.233 + seed * 0.000123) * 43758.5453;
+  return value - Math.floor(value);
+}
+
+function rgbToHsv(r: number, g: number, b: number): [number, number, number] {
+  const nr = r / 255;
+  const ng = g / 255;
+  const nb = b / 255;
+  const max = Math.max(nr, ng, nb);
+  const min = Math.min(nr, ng, nb);
+  const d = max - min;
+  let h = 0;
+  if (d !== 0) {
+    if (max === nr) h = ((ng - nb) / d) % 6;
+    else if (max === ng) h = (nb - nr) / d + 2;
+    else h = (nr - ng) / d + 4;
+    h *= 60;
+    if (h < 0) h += 360;
+  }
+  const s = max === 0 ? 0 : d / max;
+  return [h, s, max];
+}
+
+function pixelMetric(r: number, g: number, b: number, metric: FrontendGlitchParams["pixelSortMetric"]): number {
+  if (metric === "rgb-sum") return r + g + b;
+  if (metric === "saturation") return rgbToHsv(r, g, b)[1] * 255;
+  if (metric === "hue") return rgbToHsv(r, g, b)[0];
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function closestPaletteColor(r: number, g: number, b: number, palette: number[][]): [number, number, number] {
+  if (!palette.length) return [r, g, b];
+  let best = palette[0] as [number, number, number];
+  let bestDist = Number.POSITIVE_INFINITY;
+  for (const color of palette) {
+    const dr = r - (color[0] ?? 0);
+    const dg = g - (color[1] ?? 0);
+    const db = b - (color[2] ?? 0);
+    const dist = dr * dr + dg * dg + db * db;
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = [color[0] ?? 0, color[1] ?? 0, color[2] ?? 0];
+    }
+  }
+  return best;
+}
+
+export function applyGlitch(imageData: ImageData, params: FrontendGlitchParams, palette: number[][]): ImageData {
+  if (params.glitchType === "None") {
+    return imageData;
+  }
+
+  const original = new Uint8ClampedArray(imageData.data);
+  const out = new ImageData(imageData.width, imageData.height);
+  out.data.set(imageData.data);
+  const { width, height } = out;
+  const data = out.data;
+
+  if (params.glitchType === "RGB Shift") {
+    const source = new Uint8ClampedArray(data);
+    const intensity = Math.max(0, Math.min(100, params.globalRgbShiftIntensity)) / 100;
+    const shifts: Array<[number, number]> = [
+      [Math.round(params.redShiftX * intensity), Math.round(params.redShiftY * intensity)],
+      [Math.round(params.greenShiftX * intensity), Math.round(params.greenShiftY * intensity)],
+      [Math.round(params.blueShiftX * intensity), Math.round(params.blueShiftY * intensity)],
+    ];
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const dst = (y * width + x) * 4;
+        for (let c = 0; c < 3; c++) {
+          const sx = Math.max(0, Math.min(width - 1, x + shifts[c][0]));
+          const sy = Math.max(0, Math.min(height - 1, y + shifts[c][1]));
+          const src = (sy * width + sx) * 4;
+          data[dst + c] = source[src + c];
+        }
+      }
+    }
+  }
+
+  if (params.glitchType === "Slice") {
+    const source = new Uint8ClampedArray(data);
+    const sliceCount = Math.max(1, Math.floor(params.sliceCount));
+    const maxOffset = Math.max(0, Math.floor(params.maxOffset));
+    for (let i = 0; i < sliceCount; i++) {
+      const startY = Math.floor(seededNoise(params.globalSeed + i, i, height) * height);
+      const bandHeight = Math.max(1, Math.floor((seededNoise(params.globalSeed + i * 7, i, 1) * height) / 8));
+      const offset = Math.floor((seededNoise(params.globalSeed + i * 17, i, 2) * 2 - 1) * maxOffset);
+      for (let y = startY; y < Math.min(height, startY + bandHeight); y++) {
+        for (let x = 0; x < width; x++) {
+          const sx = Math.max(0, Math.min(width - 1, x + offset));
+          const dst = (y * width + x) * 4;
+          const src = (y * width + sx) * 4;
+          data[dst] = source[src];
+          data[dst + 1] = source[src + 1];
+          data[dst + 2] = source[src + 2];
+        }
+      }
+    }
+  }
+
+  if (params.glitchType === "Block Noise") {
+    const source = new Uint8ClampedArray(data);
+    const block = Math.max(2, Math.floor(params.blockSize));
+    const chaos = Math.max(0, Math.min(100, params.chaos)) / 100;
+    const quant = Math.max(0, Math.min(100, params.quantization));
+    const levels = Math.max(2, Math.round(32 - (quant / 100) * 30));
+    const step = 255 / (levels - 1);
+    for (let by = 0; by < height; by += block) {
+      for (let bx = 0; bx < width; bx += block) {
+        const shiftX = Math.round((seededNoise(params.globalSeed, bx, by) * 2 - 1) * chaos * block * 2);
+        const shiftY = Math.round((seededNoise(params.globalSeed + 77, bx, by) * 2 - 1) * chaos * block * 2);
+        for (let y = by; y < Math.min(height, by + block); y++) {
+          for (let x = bx; x < Math.min(width, bx + block); x++) {
+            const sx = Math.max(0, Math.min(width - 1, x + shiftX));
+            const sy = Math.max(0, Math.min(height - 1, y + shiftY));
+            const src = (sy * width + sx) * 4;
+            const dst = (y * width + x) * 4;
+            data[dst] = Math.round(source[src] / step) * step;
+            data[dst + 1] = Math.round(source[src + 1] / step) * step;
+            data[dst + 2] = Math.round(source[src + 2] / step) * step;
+          }
+        }
+      }
+    }
+  }
+
+  if (params.glitchType === "Pixel Sort") {
+    const source = new Uint8ClampedArray(data);
+    const min = Math.max(0, Math.min(100, params.thresholdMin)) * 2.55;
+    const max = Math.max(0, Math.min(100, params.thresholdMax)) * 2.55;
+    const length = Math.max(2, Math.floor(params.sortLength));
+    const vertical = Math.abs(((params.angle % 180) + 180) % 180 - 90) < 35;
+
+    const sortSegment = (coords: Array<[number, number]>) => {
+      const sortable = coords
+        .map(([x, y]) => {
+          const idx = (y * width + x) * 4;
+          const r = source[idx];
+          const g = source[idx + 1];
+          const b = source[idx + 2];
+          const lum = pixelMetric(r, g, b, "luma");
+          const inThreshold = lum >= min && lum <= max;
+          const inMask = params.pixelSortMask === "all"
+            || (params.pixelSortMask === "dark" && lum < 128)
+            || (params.pixelSortMask === "light" && lum >= 128);
+          return { x, y, r, g, b, canMove: inThreshold && inMask };
+        });
+
+      for (let i = 0; i < sortable.length; i += length) {
+        const segment = sortable.slice(i, i + length);
+        const movable = segment.filter((entry) => entry.canMove);
+        movable.sort((a, b) => pixelMetric(a.r, a.g, a.b, params.pixelSortMetric) - pixelMetric(b.r, b.g, b.b, params.pixelSortMetric));
+        let take = 0;
+        for (const entry of segment) {
+          const idx = (entry.y * width + entry.x) * 4;
+          const from = entry.canMove ? movable[take++] : entry;
+          data[idx] = from.r;
+          data[idx + 1] = from.g;
+          data[idx + 2] = from.b;
+        }
+      }
+    };
+
+    if (vertical) {
+      for (let x = 0; x < width; x++) {
+        sortSegment(Array.from({ length: height }, (_, y) => [x, y] as [number, number]));
+      }
+    } else {
+      for (let y = 0; y < height; y++) {
+        sortSegment(Array.from({ length: width }, (_, x) => [x, y] as [number, number]));
+      }
+    }
+  }
+
+  if (params.glitchType === "Analog") {
+    const source = new Uint8ClampedArray(data);
+    const line = Math.max(1, Math.floor(params.scanlineThickness));
+    const gap = Math.max(1, Math.floor(params.scanlineGap));
+    const curvature = Math.max(0, Math.min(100, params.curvature)) / 100;
+    const flicker = Math.max(0, Math.min(100, params.flicker)) / 100;
+    for (let y = 0; y < height; y++) {
+      const linePhase = (y % (line + gap)) < line;
+      const jitter = Math.round((seededNoise(params.globalSeed + 999, y, 0) * 2 - 1) * 4);
+      for (let x = 0; x < width; x++) {
+        const edge = (x / Math.max(1, width - 1) - 0.5) * 2;
+        const curveShift = Math.round(edge * edge * curvature * 12 * Math.sign(edge));
+        const sx = Math.max(0, Math.min(width - 1, x + jitter + curveShift));
+        const src = (y * width + sx) * 4;
+        const dst = (y * width + x) * 4;
+        const dim = linePhase ? 0.72 : 1.0;
+        const flick = 1 - flicker * 0.15 + seededNoise(params.globalSeed + 313, x, y) * flicker * 0.15;
+        data[dst] = Math.max(0, Math.min(255, source[src] * dim * flick));
+        data[dst + 1] = Math.max(0, Math.min(255, source[src + 1] * dim * flick));
+        data[dst + 2] = Math.max(0, Math.min(255, source[src + 2] * dim * flick));
+      }
+    }
+  }
+
+  if (params.snapGlitchToPalette && palette.length > 0) {
+    const mix = Math.max(0, Math.min(100, params.paletteMix)) / 100;
+    for (let i = 0; i < data.length; i += 4) {
+      const changed = data[i] !== original[i] || data[i + 1] !== original[i + 1] || data[i + 2] !== original[i + 2];
+      if (!changed) {
+        continue;
+      }
+      const [pr, pg, pb] = closestPaletteColor(data[i], data[i + 1], data[i + 2], palette);
+      data[i] = Math.round(lerp(data[i], pr, mix));
+      data[i + 1] = Math.round(lerp(data[i + 1], pg, mix));
+      data[i + 2] = Math.round(lerp(data[i + 2], pb, mix));
+    }
+  }
+
+  return out;
 }
 
 export function adjustImage(

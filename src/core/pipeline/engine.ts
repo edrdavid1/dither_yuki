@@ -2,9 +2,11 @@ import {
   adjustImage,
   applyBlur,
   applyDithering,
+  applyGlitch,
   applyNoise,
   applyPixelScale,
   applySharpness,
+  getPaletteColors,
 } from "@/utils/dithering";
 import type { PipelineEffect } from "./types";
 
@@ -37,12 +39,17 @@ export function runImagePipeline(source: ImageData, effects: PipelineEffect[]): 
       case "pixelScale":
         current = applyPixelScale(current, effect.params.scale);
         break;
+      case "glitch": {
+        current = applyGlitch(current, effect.params, getPaletteColors(effect.params.palette));
+        break;
+      }
       case "dither":
         current = applyDithering(
           current,
           effect.params.algorithm,
           effect.params.palette,
           effect.params.intensity,
+          effect.params.customPalette,
         );
         break;
       default: {

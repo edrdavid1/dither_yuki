@@ -1,8 +1,7 @@
 import { useState, useEffect } from "react";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { X, Plus, Shuffle, ArrowUpDown } from "lucide-react";
+import { ChevronsVertical, Delete, Plus, Repeat } from "pixelarticons/react";
 
 interface PaletteEditorProps {
   onSave: (colors: string[]) => void;
@@ -122,14 +121,14 @@ export const PaletteEditor = ({ onSave, onClose, initialColors = ["#000000", "#F
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="win95-window w-full max-w-2xl max-h-[90vh] overflow-auto">
+      <div className="win95-window win98-scroll w-full max-w-2xl max-h-[90vh] overflow-auto">
         <div className="win95-titlebar">
           <span className="text-sm">Palette Editor Pro</span>
           <button 
             className="bg-card px-2 text-xs border border-win95-light hover:bg-muted"
             onClick={onClose}
           >
-            ×
+            <Delete className="h-3 w-3" />
           </button>
         </div>
         
@@ -154,7 +153,7 @@ export const PaletteEditor = ({ onSave, onClose, initialColors = ["#000000", "#F
           <div className="win95-panel p-3 space-y-3">
             <Label className="text-sm font-bold">Palette Colors</Label>
             
-            <div className="space-y-2 max-h-[300px] overflow-y-auto">
+            <div className="space-y-2 max-h-[300px] overflow-y-auto win98-scroll">
               {colors.map((color, index) => (
                 <div
                   key={index}
@@ -193,7 +192,7 @@ export const PaletteEditor = ({ onSave, onClose, initialColors = ["#000000", "#F
                       className="win95-button p-1 hover:bg-destructive hover:text-destructive-foreground"
                       title="Remove color"
                     >
-                      <X size={14} />
+                      <Delete className="h-3.5 w-3.5" />
                     </button>
                   )}
                 </div>
@@ -223,7 +222,7 @@ export const PaletteEditor = ({ onSave, onClose, initialColors = ["#000000", "#F
                 onClick={handleAddColor}
                 className="win95-button text-xs px-3 py-2 flex items-center gap-1"
               >
-                <Plus size={14} />
+                <Plus className="h-3.5 w-3.5" />
                 Add Color
               </button>
               
@@ -231,7 +230,7 @@ export const PaletteEditor = ({ onSave, onClose, initialColors = ["#000000", "#F
                 onClick={handleSortByBrightness}
                 className="win95-button text-xs px-3 py-2 flex items-center gap-1"
               >
-                <ArrowUpDown size={14} />
+                <ChevronsVertical className="h-3.5 w-3.5" />
                 Sort by Brightness
               </button>
               
@@ -240,7 +239,7 @@ export const PaletteEditor = ({ onSave, onClose, initialColors = ["#000000", "#F
                 className="win95-button text-xs px-3 py-2 flex items-center gap-1"
                 disabled={colors.length < 2}
               >
-                <Shuffle size={14} />
+                <Repeat className="h-3.5 w-3.5" />
                 Auto Interpolate
               </button>
             </div>

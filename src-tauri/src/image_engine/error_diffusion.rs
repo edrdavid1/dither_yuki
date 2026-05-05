@@ -1,26 +1,8 @@
 // Error diffusion dithering algorithms
 
+use super::context::FrameContext;
 use super::types::{Effect, ImageData};
-
-/// Find closest color in palette
-fn find_closest_color(r: u8, g: u8, b: u8, palette: &[[u8; 3]]) -> [u8; 3] {
-    let mut min_dist = f32::MAX;
-    let mut closest = palette[0];
-
-    for color in palette {
-        let dr = (r as f32) - (color[0] as f32);
-        let dg = (g as f32) - (color[1] as f32);
-        let db = (b as f32) - (color[2] as f32);
-        let dist = dr * dr + dg * dg + db * db;
-
-        if dist < min_dist {
-            min_dist = dist;
-            closest = *color;
-        }
-    }
-
-    closest
-}
+use super::color::find_closest_color_oklab;
 
 /// Distribute error to neighboring pixels
 fn distribute_error(
@@ -52,7 +34,7 @@ pub struct FloydSteinberg {
 }
 
 impl Effect for FloydSteinberg {
-    fn apply(&self, image: &mut ImageData) -> Result<(), String> {
+    fn apply(&self, image: &mut ImageData, _ctx: &FrameContext) -> Result<(), String> {
         let width = image.width;
         let height = image.height;
         let intensity = self.intensity / 100.0;
@@ -66,7 +48,7 @@ impl Effect for FloydSteinberg {
                 let old_b = image.data[idx + 2] as f32;
 
                 let [new_r, new_g, new_b] =
-                    find_closest_color(old_r as u8, old_g as u8, old_b as u8, &self.palette);
+                    find_closest_color_oklab(old_r as u8, old_g as u8, old_b as u8, &self.palette);
 
                 image.data[idx] = new_r;
                 image.data[idx + 1] = new_g;
@@ -98,7 +80,7 @@ pub struct Atkinson {
 }
 
 impl Effect for Atkinson {
-    fn apply(&self, image: &mut ImageData) -> Result<(), String> {
+    fn apply(&self, image: &mut ImageData, _ctx: &FrameContext) -> Result<(), String> {
         let width = image.width;
         let height = image.height;
         let intensity = self.intensity / 100.0 / 8.0; // Atkinson divides by 8
@@ -112,7 +94,7 @@ impl Effect for Atkinson {
                 let old_b = image.data[idx + 2] as f32;
 
                 let [new_r, new_g, new_b] =
-                    find_closest_color(old_r as u8, old_g as u8, old_b as u8, &self.palette);
+                    find_closest_color_oklab(old_r as u8, old_g as u8, old_b as u8, &self.palette);
 
                 image.data[idx] = new_r;
                 image.data[idx + 1] = new_g;
@@ -146,7 +128,7 @@ pub struct JarvisJudiceNinke {
 }
 
 impl Effect for JarvisJudiceNinke {
-    fn apply(&self, image: &mut ImageData) -> Result<(), String> {
+    fn apply(&self, image: &mut ImageData, _ctx: &FrameContext) -> Result<(), String> {
         let width = image.width;
         let height = image.height;
         let intensity = self.intensity / 100.0;
@@ -160,7 +142,7 @@ impl Effect for JarvisJudiceNinke {
                 let old_b = image.data[idx + 2] as f32;
 
                 let [new_r, new_g, new_b] =
-                    find_closest_color(old_r as u8, old_g as u8, old_b as u8, &self.palette);
+                    find_closest_color_oklab(old_r as u8, old_g as u8, old_b as u8, &self.palette);
 
                 image.data[idx] = new_r;
                 image.data[idx + 1] = new_g;
@@ -200,7 +182,7 @@ pub struct Sierra {
 }
 
 impl Effect for Sierra {
-    fn apply(&self, image: &mut ImageData) -> Result<(), String> {
+    fn apply(&self, image: &mut ImageData, _ctx: &FrameContext) -> Result<(), String> {
         let width = image.width;
         let height = image.height;
         let intensity = self.intensity / 100.0;
@@ -214,7 +196,7 @@ impl Effect for Sierra {
                 let old_b = image.data[idx + 2] as f32;
 
                 let [new_r, new_g, new_b] =
-                    find_closest_color(old_r as u8, old_g as u8, old_b as u8, &self.palette);
+                    find_closest_color_oklab(old_r as u8, old_g as u8, old_b as u8, &self.palette);
 
                 image.data[idx] = new_r;
                 image.data[idx + 1] = new_g;
@@ -252,7 +234,7 @@ pub struct Stucki {
 }
 
 impl Effect for Stucki {
-    fn apply(&self, image: &mut ImageData) -> Result<(), String> {
+    fn apply(&self, image: &mut ImageData, _ctx: &FrameContext) -> Result<(), String> {
         let width = image.width;
         let height = image.height;
         let intensity = self.intensity / 100.0;
@@ -266,7 +248,7 @@ impl Effect for Stucki {
                 let old_b = image.data[idx + 2] as f32;
 
                 let [new_r, new_g, new_b] =
-                    find_closest_color(old_r as u8, old_g as u8, old_b as u8, &self.palette);
+                    find_closest_color_oklab(old_r as u8, old_g as u8, old_b as u8, &self.palette);
 
                 image.data[idx] = new_r;
                 image.data[idx + 1] = new_g;
@@ -306,7 +288,7 @@ pub struct Burkes {
 }
 
 impl Effect for Burkes {
-    fn apply(&self, image: &mut ImageData) -> Result<(), String> {
+    fn apply(&self, image: &mut ImageData, _ctx: &FrameContext) -> Result<(), String> {
         let width = image.width;
         let height = image.height;
         let intensity = self.intensity / 100.0;
@@ -320,7 +302,7 @@ impl Effect for Burkes {
                 let old_b = image.data[idx + 2] as f32;
 
                 let [new_r, new_g, new_b] =
-                    find_closest_color(old_r as u8, old_g as u8, old_b as u8, &self.palette);
+                    find_closest_color_oklab(old_r as u8, old_g as u8, old_b as u8, &self.palette);
 
                 image.data[idx] = new_r;
                 image.data[idx + 1] = new_g;
@@ -355,7 +337,7 @@ pub struct TwoRowSierra {
 }
 
 impl Effect for TwoRowSierra {
-    fn apply(&self, image: &mut ImageData) -> Result<(), String> {
+    fn apply(&self, image: &mut ImageData, _ctx: &FrameContext) -> Result<(), String> {
         let width = image.width;
         let height = image.height;
         let intensity = self.intensity / 100.0;
@@ -369,7 +351,7 @@ impl Effect for TwoRowSierra {
                 let old_b = image.data[idx + 2] as f32;
 
                 let [new_r, new_g, new_b] =
-                    find_closest_color(old_r as u8, old_g as u8, old_b as u8, &self.palette);
+                    find_closest_color_oklab(old_r as u8, old_g as u8, old_b as u8, &self.palette);
 
                 image.data[idx] = new_r;
                 image.data[idx + 1] = new_g;
@@ -404,7 +386,7 @@ pub struct FalseFloydSteinberg {
 }
 
 impl Effect for FalseFloydSteinberg {
-    fn apply(&self, image: &mut ImageData) -> Result<(), String> {
+    fn apply(&self, image: &mut ImageData, _ctx: &FrameContext) -> Result<(), String> {
         let width = image.width;
         let height = image.height;
         let intensity = self.intensity / 100.0;
@@ -418,7 +400,7 @@ impl Effect for FalseFloydSteinberg {
                 let old_b = image.data[idx + 2] as f32;
 
                 let [new_r, new_g, new_b] =
-                    find_closest_color(old_r as u8, old_g as u8, old_b as u8, &self.palette);
+                    find_closest_color_oklab(old_r as u8, old_g as u8, old_b as u8, &self.palette);
 
                 image.data[idx] = new_r;
                 image.data[idx + 1] = new_g;
@@ -449,7 +431,7 @@ pub struct ShiauFan {
 }
 
 impl Effect for ShiauFan {
-    fn apply(&self, image: &mut ImageData) -> Result<(), String> {
+    fn apply(&self, image: &mut ImageData, _ctx: &FrameContext) -> Result<(), String> {
         let width = image.width;
         let height = image.height;
         let intensity = self.intensity / 100.0;
@@ -463,7 +445,7 @@ impl Effect for ShiauFan {
                 let old_b = image.data[idx + 2] as f32;
 
                 let [new_r, new_g, new_b] =
-                    find_closest_color(old_r as u8, old_g as u8, old_b as u8, &self.palette);
+                    find_closest_color_oklab(old_r as u8, old_g as u8, old_b as u8, &self.palette);
 
                 image.data[idx] = new_r;
                 image.data[idx + 1] = new_g;
@@ -487,5 +469,50 @@ impl Effect for ShiauFan {
 
     fn name(&self) -> &str {
         "Shiau Fan"
+    }
+}
+
+/// Sierra Lite dithering
+pub struct SierraLite {
+    pub palette: Vec<[u8; 3]>,
+    pub intensity: f32,
+}
+
+impl Effect for SierraLite {
+    fn apply(&self, image: &mut ImageData, _ctx: &FrameContext) -> Result<(), String> {
+        let width = image.width;
+        let height = image.height;
+        let intensity = self.intensity / 100.0;
+
+        for y in 0..height {
+            for x in 0..width {
+                let idx = ((y) * width + (x)) as usize * 4;
+
+                let old_r = image.data[idx] as f32;
+                let old_g = image.data[idx + 1] as f32;
+                let old_b = image.data[idx + 2] as f32;
+
+                let [new_r, new_g, new_b] =
+                    find_closest_color_oklab(old_r as u8, old_g as u8, old_b as u8, &self.palette);
+
+                image.data[idx] = new_r;
+                image.data[idx + 1] = new_g;
+                image.data[idx + 2] = new_b;
+
+                let err_r = (old_r - (new_r as f32)) * intensity;
+                let err_g = (old_g - (new_g as f32)) * intensity;
+                let err_b = (old_b - (new_b as f32)) * intensity;
+
+                distribute_error(&mut image.data, width, height, x as i32 + 1, y as i32, err_r * 2.0 / 4.0, err_g * 2.0 / 4.0, err_b * 2.0 / 4.0);
+                distribute_error(&mut image.data, width, height, x as i32 - 1, y as i32 + 1, err_r * 1.0 / 4.0, err_g * 1.0 / 4.0, err_b * 1.0 / 4.0);
+                distribute_error(&mut image.data, width, height, x as i32, y as i32 + 1, err_r * 1.0 / 4.0, err_g * 1.0 / 4.0, err_b * 1.0 / 4.0);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn name(&self) -> &str {
+        "Sierra Lite"
     }
 }
