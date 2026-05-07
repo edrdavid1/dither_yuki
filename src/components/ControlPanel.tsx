@@ -90,6 +90,10 @@ interface ControlPanelProps {
   setCurvature: (value: number) => void;
   paletteMix: number;
   setPaletteMix: (value: number) => void;
+  maskTarget: "all" | "edges" | "highlights" | "midtones" | "shadows";
+  setMaskTarget: (value: "all" | "edges" | "highlights" | "midtones" | "shadows") => void;
+  maskFeather: number;
+  setMaskFeather: (value: number) => void;
 }
 
 type ModuleId = "dither" | "glitch" | "mask";
@@ -184,14 +188,16 @@ export const ControlPanel = ({
   setCurvature,
   paletteMix,
   setPaletteMix,
+  maskTarget,
+  setMaskTarget,
+  maskFeather,
+  setMaskFeather,
 }: ControlPanelProps) => {
   const isDitheringDisabled = algorithm === "None";
   const [activeModuleId, setActiveModuleId] = useState<ModuleId>("dither");
   const [draggedModuleId, setDraggedModuleId] = useState<string | null>(null);
   const [draggedPaletteIndex, setDraggedPaletteIndex] = useState<number | null>(null);
   const [blueNoiseEnabled, setBlueNoiseEnabled] = useState(false);
-  const [maskTarget, setMaskTarget] = useState<"all" | "edges" | "highlights" | "midtones">("all");
-  const [maskFeather, setMaskFeather] = useState(0.2);
 
   const [stack, setStack] = useState(MODULES);
 
@@ -211,7 +217,7 @@ export const ControlPanel = ({
 
   return (
     <TooltipProvider delayDuration={120}>
-      <div className="win95-panel space-y-4 win98-scroll inspector-borderless">
+      <div className="flex flex-col space-y-1">
         <div className="win98-card">
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -222,10 +228,10 @@ export const ControlPanel = ({
           </div>
         </div>
 
-        <div className="win98-card space-y-3">
+        <div className="win98-card space-y-1">
           <div className="win98-section-title flex items-center justify-between gap-2">
             <span>Global & Colors</span>
-            <Hint text="Палитра, snap глитча к палитре и global seed для случайных параметров." />
+            <Hint text="Palette, glitch snap-to-palette, and global seed for random parameters." />
           </div>
 
           <div>
@@ -279,7 +285,7 @@ export const ControlPanel = ({
           </div>
         </div>
 
-        <div className="win98-card space-y-3">
+        <div className="win98-card space-y-1">
           <div className="win98-section-title">Processing Stack</div>
           <div className="flex items-center gap-1">
             {stack.map((item, idx) => {
@@ -322,7 +328,7 @@ export const ControlPanel = ({
           </div>
         </div>
 
-        <div className="win98-card space-y-3">
+        <div className="win98-card space-y-1">
           <div className="win98-section-title flex items-center justify-between gap-2">
             <span className="flex items-center gap-2"><SettingsCog className="h-3 w-3" /> Detailed Settings</span>
             <div className="win98-badge">{activeModule?.title ?? "Module"}</div>
@@ -474,18 +480,18 @@ export const ControlPanel = ({
             <>
               <div className="space-y-2">
                 <div className="flex justify-between text-xs"><span>Target</span><span>{maskTarget}</span></div>
-                <Select value={maskTarget} onValueChange={(value: "all" | "edges" | "highlights" | "midtones") => setMaskTarget(value)}>
+                <Select value={maskTarget} onValueChange={(value: "all" | "edges" | "highlights" | "midtones" | "shadows") => setMaskTarget(value)}>
                   <SelectTrigger className="win95-input bg-input"><SelectValue /></SelectTrigger>
                   <SelectContent className="win95-window">
-                    <SelectItem value="all">All</SelectItem>
+                    <SelectItem value="all">All (no mask)</SelectItem>
                     <SelectItem value="edges">Edges</SelectItem>
                     <SelectItem value="highlights">Highlights</SelectItem>
                     <SelectItem value="midtones">Midtones</SelectItem>
+                    <SelectItem value="shadows">Shadows</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-2"><div className="flex justify-between text-xs"><span>Mask Feather</span><span>{maskFeather.toFixed(2)}</span></div><Slider value={[maskFeather]} onValueChange={(v) => setMaskFeather(v[0])} min={0} max={1} step={0.01} className="cursor-pointer" /></div>
-              <div className="text-[11px] text-muted-foreground win95-border p-2">Masking UI готово; подключение масок в backend-пайплайн — следующий этап.</div>
+              <div className="space-y-2"><div className="flex justify-between text-xs"><span>Feather</span><span>{maskFeather.toFixed(2)}</span></div><Slider value={[maskFeather]} onValueChange={(v) => setMaskFeather(v[0])} min={0} max={1} step={0.01} className="cursor-pointer" /></div>
             </>
           )}
         </div>

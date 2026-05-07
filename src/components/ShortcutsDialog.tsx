@@ -9,11 +9,18 @@ export const ShortcutsDialog = ({ onClose }: ShortcutsDialogProps) => {
   const mod = isMac ? 'Cmd' : 'Ctrl';
   const shortcuts = [
     { key: `${mod} + O`, action: "Open Image" },
-    { key: `${mod} + S`, action: "Save Image" },
+    { key: `${mod} + Shift + O`, action: "Open Project (.dyproj)" },
+    { key: `${mod} + S`, action: "Save Project (.dyproj)" },
+    { key: `${mod} + Shift + S`, action: "Export Image (PNG)" },
     { key: `${mod} + E`, action: "Export Image" },
+    { key: `${mod} + Z`, action: "Undo" },
+    { key: `${mod} + Shift + Z`, action: "Redo" },
+    { key: `${mod} + Y`, action: "Redo (alt)" },
     { key: `${mod} + R`, action: "Reset to Original" },
-    { key: `${mod} + P`, action: "Edit Palette" },
-    { key: "+ / -", action: "Zoom In/Out" },
+    { key: `${mod} + P`, action: "Edit Palette (Color Studio)" },
+    { key: "F", action: "Toggle Focus Mode" },
+    { key: "Delete / Backspace", action: "Delete Selected Frame (Animation)" },
+    { key: "+ / -", action: "Zoom In / Out" },
     { key: "0", action: "Reset Zoom" },
   ];
 

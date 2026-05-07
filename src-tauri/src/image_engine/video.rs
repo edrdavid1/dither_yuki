@@ -23,6 +23,8 @@ pub struct EffectLayer {
     pub glitch_type: Option<String>,
     pub sort_by: Option<String>,
     pub masking: Option<String>,
+    pub mask_target: Option<String>,
+    pub mask_feather: Option<f32>,
     pub threshold_min: Option<f32>,
     pub threshold_max: Option<f32>,
     pub direction_angle: Option<f32>,
@@ -47,6 +49,21 @@ pub struct EffectLayer {
     pub snap_to_palette: Option<bool>,
     pub palette_mix: Option<f32>,
     pub global_seed: Option<u64>,
+    /// Optional per-channel mask applied after this layer's effect.
+    /// Disabled channels are zeroed in the output.
+    pub channel_mask: Option<ChannelMask>,
+    /// When true, the alpha channel from the source image is preserved in the
+    /// output regardless of what the effect would produce.
+    pub keep_alpha: Option<bool>,
+}
+
+/// Per-channel on/off mask.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct ChannelMask {
+    pub r: bool,
+    pub g: bool,
+    pub b: bool,
+    pub a: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -236,6 +253,8 @@ struct ResolvedLayer {
     glitch_type: String,
     sort_by: String,
     masking: String,
+    mask_target: String,
+    mask_feather: f32,
     threshold_min: f32,
     threshold_max: f32,
     direction_angle: f32,
@@ -260,6 +279,8 @@ struct ResolvedLayer {
     snap_to_palette: bool,
     palette_mix: f32,
     global_seed: u64,
+    channel_mask: Option<ChannelMask>,
+    keep_alpha: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -338,6 +359,12 @@ impl ResolvedLayer {
                 .clone()
                 .unwrap_or_else(|| "all".to_string())
                 .to_ascii_lowercase(),
+            mask_target: layer
+                .mask_target
+                .clone()
+                .unwrap_or_else(|| "all".to_string())
+                .to_ascii_lowercase(),
+            mask_feather: layer.mask_feather.unwrap_or(0.2).clamp(0.0, 1.0),
             threshold_min: layer.threshold_min.unwrap_or(20.0).clamp(0.0, 100.0),
             threshold_max: layer.threshold_max.unwrap_or(80.0).clamp(0.0, 100.0),
             direction_angle: layer.direction_angle.unwrap_or(0.0),
@@ -362,6 +389,8 @@ impl ResolvedLayer {
             snap_to_palette: layer.snap_to_palette.unwrap_or(false),
             palette_mix: layer.palette_mix.unwrap_or(100.0).clamp(0.0, 100.0),
             global_seed: layer.global_seed.unwrap_or(1337),
+            channel_mask: layer.channel_mask,
+            keep_alpha: layer.keep_alpha.unwrap_or(false),
         })
     }
 }
@@ -827,6 +856,105 @@ fn blend_channel(base: f32, top: f32, mode: BlendMode) -> f32 {
     }
 }
 
+/// Apply a content-aware mask to `effected`, blending it against the original `source` pixels.
+/// mask_target: "all" | "highlights" | "midtones" | "shadows" | "edges"
+/// mask_feather: 0.0 = hard edge, 1.0 = very soft transition
+fn apply_content_mask(effected: &mut ImageData, source: &ImageData, target: &str, feather: f32) {
+    if target == "all" {
+        return;
+    }
+    let feather = feather.clamp(0.001, 1.0);
+    let n = (effected.width * effected.height) as usize;
+
+    // Pre-compute per-pixel edge magnitude for "edges" mode using a simple Sobel.
+    let edge_map: Vec<f32> = if target == "edges" {
+        let w = effected.width as usize;
+        let h = effected.height as usize;
+        let mut map = vec![0f32; n];
+        let luma_at = |x: usize, y: usize| -> f32 {
+            let idx = (y * w + x) * 4;
+            let r = source.data[idx] as f32;
+            let g = source.data[idx + 1] as f32;
+            let b = source.data[idx + 2] as f32;
+            (0.299 * r + 0.587 * g + 0.114 * b) / 255.0
+        };
+        for y in 1..h.saturating_sub(1) {
+            for x in 1..w.saturating_sub(1) {
+                let gx = -luma_at(x - 1, y - 1) - 2.0 * luma_at(x - 1, y) - luma_at(x - 1, y + 1)
+                    + luma_at(x + 1, y - 1) + 2.0 * luma_at(x + 1, y) + luma_at(x + 1, y + 1);
+                let gy = -luma_at(x - 1, y - 1) - 2.0 * luma_at(x, y - 1) - luma_at(x + 1, y - 1)
+                    + luma_at(x - 1, y + 1) + 2.0 * luma_at(x, y + 1) + luma_at(x + 1, y + 1);
+                map[y * w + x] = (gx * gx + gy * gy).sqrt().clamp(0.0, 1.0);
+            }
+        }
+        map
+    } else {
+        Vec::new()
+    };
+
+    fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+        let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    }
+
+    for i in 0..n {
+        let idx = i * 4;
+        let r = source.data[idx] as f32;
+        let g = source.data[idx + 1] as f32;
+        let b = source.data[idx + 2] as f32;
+        let luma = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0;
+
+        let weight: f32 = match target {
+            "highlights" => smoothstep(0.5 - feather * 0.5, 0.5 + feather * 0.5, luma),
+            "shadows" => 1.0 - smoothstep(0.5 - feather * 0.5, 0.5 + feather * 0.5, luma),
+            "midtones" => {
+                let center = (luma - 0.5).abs() * 2.0; // 0 at 0.5, 1 at edges
+                1.0 - smoothstep(0.5 - feather * 0.5, 0.5 + feather * 0.5, center)
+            }
+            "edges" => {
+                let mag = edge_map.get(i).copied().unwrap_or(0.0);
+                smoothstep(0.05 - feather * 0.05, 0.05 + feather * 0.45, mag)
+            }
+            _ => 1.0,
+        };
+
+        if weight >= 1.0 {
+            continue;
+        }
+        // Blend effected back towards source based on (1 - weight)
+        let inv = 1.0 - weight;
+        effected.data[idx] = (effected.data[idx] as f32 * weight + source.data[idx] as f32 * inv).round() as u8;
+        effected.data[idx + 1] = (effected.data[idx + 1] as f32 * weight + source.data[idx + 1] as f32 * inv).round() as u8;
+        effected.data[idx + 2] = (effected.data[idx + 2] as f32 * weight + source.data[idx + 2] as f32 * inv).round() as u8;
+    }
+}
+
+/// Zero out disabled channels in `effected`.
+/// If `keep_alpha` is true, the alpha channel is always restored from `source`.
+fn apply_channel_mask(effected: &mut ImageData, mask: ChannelMask, keep_alpha: bool, source: &ImageData) {
+    let n = effected.data.len();
+    let mut i = 0;
+    while i + 3 < n {
+        if !mask.r { effected.data[i]     = 0; }
+        if !mask.g { effected.data[i + 1] = 0; }
+        if !mask.b { effected.data[i + 2] = 0; }
+        if keep_alpha || !mask.a {
+            effected.data[i + 3] = source.data[i + 3];
+        }
+        i += 4;
+    }
+}
+
+/// Restore original alpha values without touching RGB.
+fn restore_alpha_channel(effected: &mut ImageData, source: &ImageData) {
+    let n = effected.data.len();
+    let mut i = 3;
+    while i < n {
+        effected.data[i] = source.data[i];
+        i += 4;
+    }
+}
+
 fn blend_images(base: &mut ImageData, top: &ImageData, mode: BlendMode, opacity: f32) {
     let opacity = opacity.clamp(0.0, 1.0);
     if opacity <= 0.0 {
@@ -1207,6 +1335,17 @@ fn process_single_frame(
 
         if layer.pixel_size > 1 {
             effected = upscale_nearest(&effected, original_width, original_height);
+        }
+
+        // Content-aware masking: restrict where the effect is visible
+        apply_content_mask(&mut effected, &image, &layer.mask_target, layer.mask_feather);
+
+        // Apply channel mask: zero disabled channels in the effected image
+        if let Some(mask) = layer.channel_mask {
+            apply_channel_mask(&mut effected, mask, layer.keep_alpha, &image);
+        } else if layer.keep_alpha {
+            // No per-channel mask but keep_alpha is set: restore original alpha values
+            restore_alpha_channel(&mut effected, &image);
         }
 
         blend_images(&mut image, &effected, layer.blend_mode, layer.opacity);

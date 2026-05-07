@@ -10,6 +10,7 @@ import {
   FileDown,
   Film,
   Focus,
+  FolderOpen,
   Image,
   Layers,
   LineChart,
@@ -20,6 +21,7 @@ import {
   PlusSquare,
   Repeat,
   Save,
+  SlidersHorizontal,
   Plus,
   Settings2,
   Shuffle,
@@ -29,6 +31,8 @@ import {
   Zap,
   ChevronUp,
   ChevronDown,
+  Lock,
+  LockOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -65,6 +69,8 @@ export const ICONS = {
   PIPELINE_DOWN: makeIcon(ChevronDown),
   PIPELINE_VISIBLE: makeIcon(Eye),
   PIPELINE_HIDDEN: makeIcon(EyeOff),
+  LAYER_LOCK: makeIcon(Lock),
+  LAYER_UNLOCK: makeIcon(LockOpen),
   PIPELINE_REMOVE: makeIcon(Trash2),
 
   PROCESS_VIDEO: makeIcon(Clapperboard),
@@ -101,6 +107,8 @@ export const ICONS = {
     </span>
   ),
   SAVE_GIF: makeIcon(Save),
+  IMPORT_FRAME: makeIcon(FolderOpen),
+  PROPERTIES: makeIcon(SlidersHorizontal),
 } as const;
 
 export type IconName = keyof typeof ICONS;

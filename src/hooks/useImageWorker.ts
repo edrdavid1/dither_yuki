@@ -10,18 +10,16 @@ import { getBackendPreview } from "@/lib/tauriBridge";
  *
  * Usage:
  *   const { processImage } = useImageWorker();
- *   const result = await processImage(imageData, layers, pixelSize);
+ *   const result = await processImage(imageData, layers);
  *
  * @param imageData - source ImageData from a canvas
  * @param layers    - ordered EffectLayer array (built via buildEffectLayerPayloadFromValues)
- * @param _pixelSize - kept for API compatibility; pixel_size is already in the layer payload
  */
 export function useImageWorker() {
   const processImage = useCallback(
     async (
       imageData: ImageData,
       layers: unknown[],
-      _pixelSize: number,
     ): Promise<{ buffer: ArrayBuffer; width: number; height: number }> => {
       const rgbaBytes = new Uint8Array(imageData.data.buffer);
       const result = await getBackendPreview(imageData.width, imageData.height, rgbaBytes, layers);

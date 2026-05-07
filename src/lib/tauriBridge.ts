@@ -61,9 +61,11 @@ export async function exportSvgFrame(request: ExportSvgRequest): Promise<ExportS
 
 export async function saveSvgWithDialog(fileName: string, bytes: number[]): Promise<string | null> {
   const selectedPath = await safeTauriInvoke<string | null>("plugin:dialog|save", {
-    title: "Save SVG",
-    defaultPath: fileName,
-    filters: [{ name: "SVG", extensions: ["svg"] }],
+    options: {
+      title: "Save SVG",
+      defaultPath: fileName,
+      filters: [{ name: "SVG", extensions: ["svg"] }],
+    },
   });
 
   if (!selectedPath) {
@@ -73,5 +75,35 @@ export async function saveSvgWithDialog(fileName: string, bytes: number[]): Prom
   return safeTauriInvoke<string>("save_bytes_to_path", {
     filePath: selectedPath,
     bytes,
+  });
+}
+
+/**
+ * Show a native "Save" dialog scoped to .dyproj files and return the chosen path,
+ * or null if the user cancelled.
+ */
+export async function pickSaveProjectPath(defaultName?: string): Promise<string | null> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<string | null>("plugin:dialog|save", {
+    options: {
+      title: "Save Project",
+      defaultPath: defaultName ?? "project.dyproj",
+      filters: [{ name: "Dither Yuki Project", extensions: ["dyproj"] }],
+    },
+  });
+}
+
+/**
+ * Show a native "Open" dialog scoped to .dyproj files and return the chosen path,
+ * or null if the user cancelled.
+ */
+export async function pickOpenProjectPath(): Promise<string | null> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<string | null>("plugin:dialog|open", {
+    options: {
+      title: "Open Project",
+      multiple: false,
+      filters: [{ name: "Dither Yuki Project", extensions: ["dyproj"] }],
+    },
   });
 }

@@ -1,26 +1,28 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   :root {
-    --background: 0 0% 75%;
-    --foreground: 0 0% 25%;
+    --background: 0 0% 75%; /* #c0c0c0 */
+    --foreground: 0 0% 10%;
 
     --card: 0 0% 75%;
-    --card-foreground: 0 0% 25%;
+    --card-foreground: 0 0% 10%;
 
     --popover: 0 0% 75%;
-    --popover-foreground: 0 0% 25%;
+    --popover-foreground: 0 0% 10%;
 
-    --primary: 224 68% 34%;
+    --primary: 240 100% 25%; /* Navy Blue #000080 */
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 0 0% 75%;
-    --secondary-foreground: 0 0% 25%;
+    --secondary: 0 0% 78%;
+    --secondary-foreground: 0 0% 10%;
 
-    --muted: 0 0% 75%;
-    --muted-foreground: 0 0% 50%;
+    --muted: 0 0% 60%;
+    --muted-foreground: 0 0% 30%;
 
     --accent: 18 72% 42%;
     --accent-foreground: 0 0% 100%;
@@ -28,19 +30,21 @@
     --destructive: 0 84% 48%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 0 0% 50%;
+    --border: 0 0% 0%; /* Black hairlines */
     --input: 0 0% 100%;
-    --ring: 224 68% 34%;
+    --ring: 240 100% 25%;
     --radius: 0rem;
+    --app-font-mono: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 
     --win95-light: 0 0% 100%;
-    --win95-dark: 0 0% 25%;
+    --win95-dark: 0 0% 0%;
     --win95-face: 0 0% 75%;
     --win95-shadow: 0 0% 50%;
   }
 
+  /* Remove global border for precise Industrial style */
   * {
-    @apply border-border;
+    border-color: #1a1a1a;
   }
 
   html,
@@ -48,286 +52,312 @@
   #root {
     width: 100vw;
     height: 100vh;
-    min-width: 900px;
+    max-width: 100vw;
+    max-height: 100vh;
     margin: 0 !important;
     padding: 0 !important;
-    overflow-x: hidden;
+    overflow: hidden !important;
     box-sizing: border-box;
+    /* Pixel-sharp font rendering for retro effect */
+    -webkit-font-smoothing: none;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   body {
-    @apply bg-background text-foreground font-tahoma;
-    background-image: none;
+    @apply bg-[#b3b3b3] text-foreground;
+    font-family: var(--app-font-mono);
+    line-height: 1.25;
+    /* Subtle grid background mimicking old monitors */
+    background-image: radial-gradient(#a3a3a3 1px, transparent 1px);
+    background-size: 16px 16px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 }
 
 @layer components {
+  .win98-desktop {
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .win98-scroll-area {
+    min-height: 0;
+    overflow-x: auto;
+    overflow-y: scroll;
+    scrollbar-gutter: stable both-edges;
+  }
+
+  /* ── Base borders Industrial (Flat Retro) ── */
   .win95-border {
-    border: 1px solid;
-    border-color: hsl(var(--win95-light)) hsl(var(--win95-dark)) hsl(var(--win95-dark)) hsl(var(--win95-light));
+    border: 1px solid #000;
   }
 
   .win95-border-inset {
-    border: 1px solid;
-    border-color: hsl(var(--win95-dark)) hsl(var(--win95-light)) hsl(var(--win95-light)) hsl(var(--win95-dark));
+    border: 1px solid #000;
+    background: #ffffff;
+    box-shadow: inset 1px 1px 0px rgba(0,0,0,0.1);
   }
 
   .win95-panel {
-    @apply bg-card win95-border p-2;
+    @apply bg-card p-1;
+    border: 1px solid #000;
   }
 
-  .win98-desktop {
-    @apply min-h-screen;
-    width: 100vw;
-    height: 100dvh;
-    margin: 0 !important;
-    padding: 0 !important;
-    background: hsl(var(--background));
-    box-sizing: border-box;
-  }
-
+  /* ── Shell & Workspace Layout ── */
   .win98-shell {
-    @apply flex h-full min-h-0 flex-col overflow-hidden win95-window;
-    box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.16);
+    @apply flex h-full min-h-0 w-full flex-col overflow-hidden bg-card;
+    border: 1px solid #000;
   }
 
   .win98-surface {
-    @apply bg-card;
-    box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.35);
+    @apply bg-card flex-1 min-h-0 flex flex-col overflow-hidden;
+    border-bottom: 1px solid #000;
   }
 
   .win98-toolbar {
-    @apply bg-card px-2 py-1 border-y border-win95-dark flex items-center gap-2 font-mono text-[11px];
+    @apply bg-card flex items-center gap-1;
+    padding: 1px 4px;
+    font-family: var(--app-font-mono);
+    font-size: 11px;
+    line-height: 1.2;
+    min-height: 22px;
+    border-bottom: 1px solid #000;
   }
 
   .win98-badge {
-    @apply inline-flex items-center gap-1 px-2 py-1 text-[11px] font-bold uppercase tracking-wide font-mono;
-    border: 1px solid;
-    border-color: hsl(var(--win95-light)) hsl(var(--win95-dark)) hsl(var(--win95-dark)) hsl(var(--win95-light));
-    background: hsl(var(--primary));
-    color: hsl(var(--primary-foreground));
+    @apply inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider font-mono;
+    font-family: var(--app-font-mono);
+    line-height: 1.2;
+    white-space: nowrap;
+    background: #000080;
+    color: #ffffff;
+    border: 1px solid #000;
   }
 
   .win98-card {
-    @apply win95-panel space-y-2;
-    box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.35);
+    @apply win95-panel space-y-1;
   }
 
   .win98-section-title {
-    @apply text-[11px] font-bold uppercase tracking-[0.12em] text-muted-foreground;
+    @apply text-[10px] font-bold uppercase tracking-[0.12em] text-muted-foreground;
+    line-height: 1.2;
   }
 
   .win98-stat-value {
-    @apply text-sm font-bold text-foreground;
+    @apply text-xs font-bold text-foreground;
   }
 
   .win98-divider {
-    @apply h-px bg-win95-dark/40;
-    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
+    height: 1px;
+    background: #000;
+    opacity: 0.2;
+    margin: 4px 0;
   }
 
-  .retro-divider {
-    border-top: 1px solid #808080;
-    box-shadow: 0 1px 0 #ffffff;
-  }
-
-  .win98-workspace-grid {
-    @apply grid h-full min-h-0 grid-rows-[minmax(0,1fr)] gap-2 xl:grid-cols-[320px_minmax(0,1fr)];
-  }
-
+  /* ── Workspace grid layouts ── */
   .win98-workspace-grid-3col {
     display: grid;
     height: 100%;
     min-height: 0;
-    width: 100vw;
-    gap: 0;
-    grid-template-columns: 280px minmax(0, 1fr) 340px;
-    box-sizing: border-box;
+    grid-template-columns: 260px minmax(0, 1fr) 300px;
+    gap: 1px;
+    background: #000; /* Grid background creates 1px divider lines */
   }
 
   .win98-workspace-grid-2col {
     display: grid;
     height: 100%;
     min-height: 0;
-    width: 100vw;
-    gap: 0;
-    grid-template-columns: minmax(0, 1fr) 340px;
-    box-sizing: border-box;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    gap: 1px;
+    background: #000;
   }
 
-  .win98-scroll {
-    scrollbar-width: auto;
-    scrollbar-color: hsl(var(--win95-shadow)) hsl(var(--card));
-    scrollbar-gutter: stable both-edges;
-  }
-
-  .win98-scroll::-webkit-scrollbar {
-    width: 16px;
-    height: 16px;
-    background: hsl(var(--card));
-  }
-
-  .win98-scroll::-webkit-scrollbar-track {
-    background: hsl(var(--card));
-    background-image:
-      linear-gradient(45deg, rgba(255, 255, 255, 0.22) 25%, transparent 25%, transparent 50%, rgba(255, 255, 255, 0.22) 50%, rgba(255, 255, 255, 0.22) 75%, transparent 75%, transparent);
-    background-size: 4px 4px;
-    box-shadow: inset 1px 1px 0 hsl(var(--win95-shadow));
-  }
-
-  .win98-scroll::-webkit-scrollbar-track:vertical {
-    border-left: 1px solid hsl(var(--win95-shadow));
-  }
-
-  .win98-scroll::-webkit-scrollbar-track:horizontal {
-    border-top: 1px solid hsl(var(--win95-shadow));
-  }
-
-  .win98-scroll::-webkit-scrollbar-thumb {
-    background: hsl(var(--win95-face));
-    border: 1px solid hsl(var(--win95-dark));
-    box-shadow:
-      inset 1px 1px 0 hsl(var(--win95-light)),
-      inset -1px -1px 0 hsl(var(--win95-dark));
-    min-height: 28px;
-    min-width: 28px;
-  }
-
-  .win98-scroll::-webkit-scrollbar-thumb:hover {
-    background: hsl(var(--secondary));
-  }
-
-  .win98-scroll::-webkit-scrollbar-thumb:active {
-    box-shadow:
-      inset 1px 1px 0 hsl(var(--win95-dark)),
-      inset -1px -1px 0 hsl(var(--win95-light));
-  }
-
-  .win98-scroll::-webkit-scrollbar-button {
-    display: block;
-    background-color: hsl(var(--win95-face));
-    background-position: center;
-    background-repeat: no-repeat;
-    border: 1px solid hsl(var(--win95-dark));
-    box-shadow:
-      inset 1px 1px 0 hsl(var(--win95-light)),
-      inset -1px -1px 0 hsl(var(--win95-dark));
-  }
-
-  .win98-scroll::-webkit-scrollbar-button:active {
-    box-shadow:
-      inset 1px 1px 0 hsl(var(--win95-dark)),
-      inset -1px -1px 0 hsl(var(--win95-light));
-  }
-
-  .win98-scroll::-webkit-scrollbar-button:single-button:vertical:decrement {
-    height: 16px;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath d='M4 1 7 5H1z' fill='black'/%3E%3C/svg%3E");
-  }
-
-  .win98-scroll::-webkit-scrollbar-button:single-button:vertical:increment {
-    height: 16px;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath d='M1 3h6L4 7z' fill='black'/%3E%3C/svg%3E");
-  }
-
-  .win98-scroll::-webkit-scrollbar-button:single-button:horizontal:decrement {
-    width: 16px;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath d='M1 4 5 1v6z' fill='black'/%3E%3C/svg%3E");
-  }
-
-  .win98-scroll::-webkit-scrollbar-button:single-button:horizontal:increment {
-    width: 16px;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath d='M3 1v6l4-3z' fill='black'/%3E%3C/svg%3E");
-  }
-
-  .win98-scroll::-webkit-scrollbar-corner {
-    background: hsl(var(--win95-face));
-    box-shadow:
-      inset 1px 1px 0 hsl(var(--win95-light)),
-      inset -1px -1px 0 hsl(var(--win95-dark));
-  }
-
-  .win98-empty-state {
-    @apply flex h-full min-h-[320px] flex-col items-center justify-center gap-2 text-center text-sm text-muted-foreground;
-  }
-
+  /* ── Industrial Flat buttons ── */
   .win95-button {
-    @apply bg-card px-3 py-1.5 font-bold text-foreground;
-    border: 1px solid;
-    border-color: hsl(var(--win95-light)) hsl(var(--win95-dark)) hsl(var(--win95-dark)) hsl(var(--win95-light));
-    box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.3);
+    @apply bg-card text-foreground transition-all duration-75;
+    padding: 2px 10px;
+    font-family: var(--app-font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.2;
+    white-space: nowrap;
+    border: 1px solid #000;
+    box-shadow: 1px 1px 0 #fff inset;
+    cursor: pointer;
+    user-select: none;
   }
 
-  .win95-button:active {
-    border-color: hsl(var(--win95-dark)) hsl(var(--win95-light)) hsl(var(--win95-light)) hsl(var(--win95-dark));
+  .win95-button:hover:not(:disabled) {
+    @apply bg-[#d0d0d0];
+  }
+
+  .win95-button:active:not(:disabled) {
+    box-shadow: none;
     transform: translate(1px, 1px);
   }
 
   .win95-button:disabled {
-    @apply text-muted-foreground cursor-not-allowed;
+    @apply opacity-50 grayscale;
+    cursor: not-allowed;
   }
 
-  .win98-icon-button {
-    @apply inline-flex items-center justify-center p-0;
-    width: 22px;
-    height: 22px;
-    min-width: 22px;
-    min-height: 22px;
+  /* ── Animation & Filmstrip (Workstation Style) ── */
+  .filmstrip-track {
+    @apply flex items-center gap-1 p-1 overflow-x-auto;
+    background: #e0e0e0;
+    border: 1px solid #000;
+    height: 56px;
+    scrollbar-width: thin;
   }
 
-  .win98-icon-separator {
-    width: 1px;
-    height: 16px;
-    background: hsl(var(--win95-dark));
-    box-shadow: 1px 0 0 hsl(var(--win95-light));
-    opacity: 0.7;
+  .retro-frame-thumb {
+    @apply relative flex-shrink-0 w-12 h-12 bg-black overflow-hidden cursor-pointer;
+    border: 1px solid #4a4a4a;
   }
 
+  .retro-frame-thumb.active {
+    outline: 1px solid #000080;
+    outline-offset: -1px;
+  }
+
+  /* ── Dialogs / Windows ── */
   .win95-window {
-    @apply bg-card;
-    border: 1px solid;
-    border-color: hsl(var(--win95-light)) hsl(var(--win95-dark)) hsl(var(--win95-dark)) hsl(var(--win95-light));
+    background: hsl(var(--card));
+    border: 1px solid #000;
   }
 
+  /* ── Titles & inputs ── */
   .win95-titlebar {
-    @apply bg-primary text-primary-foreground px-2 py-1 font-bold flex items-center justify-between;
+    @apply bg-[#000080] text-white px-1 py-0 text-[10px] font-bold uppercase tracking-wider;
+    font-family: var(--app-font-mono);
+    border-bottom: 1px solid #000;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    line-height: 1.2;
+    min-height: 22px;
+    max-height: 24px;
   }
 
   .win95-input {
-    @apply bg-input border px-2 py-1;
-    border-color: hsl(var(--win95-dark)) hsl(var(--win95-light)) hsl(var(--win95-light)) hsl(var(--win95-dark));
+    @apply bg-white px-2 py-1 font-mono text-xs;
+    font-family: var(--app-font-mono);
+    line-height: 1.25;
+    border: 1px solid #000;
+    box-shadow: inset 1px 1px 1px rgba(0,0,0,0.1);
   }
 
-  .react95-window-header {
-    @apply mb-2 flex items-center justify-between gap-2 bg-primary px-2 py-1 text-[12px] font-bold text-primary-foreground;
+  /* ── Industrial thin scrollbar ── */
+  .win98-scroll,
+  .win98-scroll-area {
+    scrollbar-width: thin;
+    scrollbar-color: #c0c0c0 #d0d0d0;
+    scrollbar-gutter: stable both-edges;
+    overflow-y: scroll;
   }
 
-  .preview-controlbar {
-    @apply px-1.5 py-1 text-[11px] items-center;
-    min-height: 34px;
-    background: hsl(var(--card));
+  .win98-scroll::-webkit-scrollbar,
+  .win98-scroll-area::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+    background: #d0d0d0;
   }
 
-  .win95-input:focus,
-  .win95-input:focus-visible {
-    border-color: hsl(var(--accent));
-    outline: none;
+  .win98-scroll::-webkit-scrollbar-track,
+  .win98-scroll-area::-webkit-scrollbar-track {
+    background-color: #d0d0d0;
+    background-image: radial-gradient(rgba(0, 0, 0, 0.14) 0.6px, transparent 0.7px);
+    background-size: 3px 3px;
+    border: 1px solid #000;
+  }
+
+  .win98-scroll::-webkit-scrollbar-thumb,
+  .win98-scroll-area::-webkit-scrollbar-thumb {
+    background: #c0c0c0;
+    border: 1px solid #000;
+    box-shadow: inset 1px 1px 0 #fff;
+    border-radius: 0;
+    min-height: 18px;
+    min-width: 18px;
+  }
+
+  .win98-scroll::-webkit-scrollbar-thumb:hover,
+  .win98-scroll-area::-webkit-scrollbar-thumb:hover {
+    background: #b9b9b9;
+  }
+
+  .win98-scroll::-webkit-scrollbar-button,
+  .win98-scroll-area::-webkit-scrollbar-button {
+    display: block;
+    width: 12px;
+    height: 12px;
+    background-color: #c0c0c0;
+    border: 1px solid #000;
+    box-shadow: inset 1px 1px 0 #fff;
+    background-position: center;
+    background-repeat: no-repeat;
+  }
+
+  .win98-scroll::-webkit-scrollbar-button:single-button:vertical:decrement,
+  .win98-scroll-area::-webkit-scrollbar-button:single-button:vertical:decrement {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='6' viewBox='0 0 6 6'%3E%3Cpath d='M3 1L5 4H1z' fill='black'/%3E%3C/svg%3E");
+  }
+
+  .win98-scroll::-webkit-scrollbar-button:single-button:vertical:increment,
+  .win98-scroll-area::-webkit-scrollbar-button:single-button:vertical:increment {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='6' viewBox='0 0 6 6'%3E%3Cpath d='M1 2h4L3 5z' fill='black'/%3E%3C/svg%3E");
+  }
+
+  .win98-scroll::-webkit-scrollbar-button:single-button:horizontal:decrement,
+  .win98-scroll-area::-webkit-scrollbar-button:single-button:horizontal:decrement {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='6' viewBox='0 0 6 6'%3E%3Cpath d='M1 3L4 1v4z' fill='black'/%3E%3C/svg%3E");
+  }
+
+  .win98-scroll::-webkit-scrollbar-button:single-button:horizontal:increment,
+  .win98-scroll-area::-webkit-scrollbar-button:single-button:horizontal:increment {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='6' viewBox='0 0 6 6'%3E%3Cpath d='M2 1v4l3-2z' fill='black'/%3E%3C/svg%3E");
+  }
+
+  .win98-scroll::-webkit-scrollbar-corner,
+  .win98-scroll-area::-webkit-scrollbar-corner {
+    background: #d0d0d0;
+    border: 1px solid #000;
+  }
+
+  /* ── Minimalism utilities ── */
+  .retro-flat-panel {
+    @apply bg-[#c0c0c0];
+    border: 1px solid #000;
+  }
+
+  .compact-toolbar {
+    @apply flex items-center gap-1 p-0.5 bg-[#c0c0c0] border-y border-black;
+  }
+
+  .retro-btn {
+    @apply bg-[#c0c0c0] border border-black px-2 py-0.5 text-[10px] uppercase font-bold;
+    box-shadow: 1px 1px 0 #fff inset;
+  }
+
+  .retro-btn:active {
     box-shadow: none;
+    @apply translate-x-px translate-y-px;
+  }
+
+  .retro-btn-primary {
+    @apply bg-[#000080] text-white;
+    border-color: #000;
   }
 
   .inspector-borderless .win98-card,
   .inspector-borderless .win95-button,
-  .inspector-borderless .win95-input,
-  .inspector-borderless [class*="win95-border"] {
+  .inspector-borderless .win95-input {
     border: none !important;
     box-shadow: none !important;
-  }
-
-  .inspector-borderless [role="combobox"],
-  .inspector-borderless button,
-  .inspector-borderless input,
-  .inspector-borderless select {
-    border-color: transparent !important;
-    outline: none;
   }
 }

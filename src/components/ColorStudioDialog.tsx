@@ -164,7 +164,7 @@ export const ColorStudioDialog = ({
         <div className="space-y-4 p-4">
           <div className="win95-panel space-y-3 p-3">
             <div className="flex items-center justify-between gap-2">
-              <Label className="text-sm font-bold">Palette generation (photo → colors)</Label>
+              <Label className="text-xs font-bold uppercase tracking-wider">Auto-extract</Label>
               <span className="win95-border-inset px-2 py-0.5 text-[10px] text-muted-foreground">{previewTitle}</span>
             </div>
 
@@ -205,12 +205,12 @@ export const ColorStudioDialog = ({
               disabled={!canAutoQuantize || isQuantizing}
             >
               <Camera className="h-3.5 w-3.5" />
-              {isQuantizing ? "Извлечение цветов..." : "Извлечь из текущего кадра"}
+              {isQuantizing ? "Extracting..." : "Extract from frame"}
             </button>
           </div>
 
           <div className="win95-panel space-y-3 p-3">
-            <Label className="text-sm font-bold">Manual palette editing</Label>
+            <Label className="text-xs font-bold uppercase tracking-wider">Manual edit</Label>
 
             <div className="flex flex-wrap gap-2">
               {[2, 4, 8, 16, 32].map((step) => (

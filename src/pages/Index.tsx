@@ -1,32 +1,44 @@
 import { useState, useRef, useEffect, useCallback, useDeferredValue, useMemo } from "react";
-import { AnimationTimelinePanel, type AnimationTemporalConfig, type AnimationTrackDraft } from "@/components/AnimationTimelinePanel";
+import { type AnimationFrame, makeAnimationFrame } from "@/types/animationFrame";
+import { DEFAULT_FRAME_SETTINGS } from "@/types/frameSettings";
 import { MenuBar } from "@/components/MenuBar";
 import { Toolbar } from "@/components/Toolbar";
 import { ControlPanel } from "@/components/ControlPanel";
-import { PreviewPanel } from "@/components/PreviewPanel";
-import { StatusBar } from "@/components/StatusBar";
-import { PipelinePanel, type PipelineStackEntry } from "@/components/PipelinePanel";
-import { ColorStudioDialog } from "@/components/ColorStudioDialog";
-import { AboutDialog } from "@/components/AboutDialog";
-import { ShortcutsDialog } from "@/components/ShortcutsDialog";
-import { PresetManager } from "@/components/PresetManager";
-import { WorkflowDock } from "@/components/WorkflowDock";
+import { AppFooterBars } from "@/components/AppFooterBars";
+import { AppOverlays } from "@/components/AppOverlays";
+import { InspectorWindow } from "@/components/InspectorWindow";
+import { LayersWindow } from "@/components/LayersWindow";
+import { WorkspaceMain } from "@/components/WorkspaceMain";
 import { type WorkspaceMode } from "@/components/WorkspaceModeSwitcher";
 import { Dock } from "pixelarticons/react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { getPaletteColors, setCustomPalette, DitheringAlgorithm, ColorPalette } from "@/utils/dithering";
 import { useImageWorker } from "@/hooks/useImageWorker";
-import { exportSvgFrame, saveSvgWithDialog, safeTauriInvoke } from "@/lib/tauriBridge";
+import { useEditorControlSync } from "@/hooks/useEditorControlSync";
+import { useLayerSession } from "@/hooks/useLayerSession";
+import { useFilmstripSession } from "@/hooks/useFilmstripSession";
+import { usePreviewOrchestration } from "@/hooks/usePreviewOrchestration";
+import { exportSvgFrame, saveSvgWithDialog, safeTauriInvoke, pickSaveProjectPath, pickOpenProjectPath } from "@/lib/tauriBridge";
+import { useProjectStore } from "@/store/projectStore";
+import { decodeFilmstripProjectData, encodeFilmstripProjectData } from "@/lib/animation/filmstripPersistence";
 import {
   buildSiblingOutputPath,
   downloadBytes,
   extractVideoFrames,
+  extractSingleVideoFrame,
   getNativeFilePath,
   imageToRgbaFrame,
   probeVideoFileMetadataLocal,
   rgbaToImage,
   type VideoMetadataLike,
 } from "@/lib/mediaWorkflow";
+import {
+  buildBackendLayersPayload,
+  cloneLayer,
+  cloneLayers,
+  createDefaultLayer,
+  type Layer,
+} from "@/types/layers";
 import { toast } from "sonner";
 
 interface PresetSettings {
@@ -65,51 +77,6 @@ interface ExportPatternPresetResponse {
   file_name: string;
   file_extension: string;
   bytes: number[];
-}
-
-interface EffectLayerPayload {
-  id: string;
-  algorithm: string;
-  enabled: boolean;
-  intensity: number;
-  blend_mode?: string;
-  opacity?: number;
-  palette_name?: string;
-  palette?: [number, number, number][];
-  contrast?: number;
-  brightness?: number;
-  saturation?: number;
-  pixel_size?: number;
-  blur?: number;
-  sharpness?: number;
-  noise?: number;
-  glitch_type?: string;
-  sort_by?: string;
-  masking?: string;
-  threshold_min?: number;
-  threshold_max?: number;
-  direction_angle?: number;
-  sort_length?: number;
-  block_size?: number;
-  chaos?: number;
-  quantization?: number;
-  red_shift_x?: number;
-  red_shift_y?: number;
-  green_shift_x?: number;
-  green_shift_y?: number;
-  blue_shift_x?: number;
-  blue_shift_y?: number;
-  global_rgb_shift_intensity?: number;
-  slice_count?: number;
-  max_offset?: number;
-  randomness?: number;
-  scanline_thickness?: number;
-  scanline_gap?: number;
-  flicker?: number;
-  curvature?: number;
-  snap_to_palette?: boolean;
-  palette_mix?: number;
-  global_seed?: number;
 }
 
 interface ProcessVideoFramesResponse {
@@ -166,12 +133,6 @@ interface DependencyStatusResponse {
   ffprobe_source?: string | null;
 }
 
-interface AnimationEditorFrame {
-  id: string;
-  src: string;
-  width: number;
-  height: number;
-}
 
 interface VideoPreviewFrame {
   id: string;
@@ -228,11 +189,6 @@ const COLOR_PALETTES: ColorPalette[] = [
   "Custom",
 ];
 
-const FRONTEND_TO_BACKEND_PALETTE: Partial<Record<ColorPalette, string>> = {
-  Gameboy: "GameBoy",
-  C64: "Commodore 64",
-};
-
 const BACKEND_TO_FRONTEND_PALETTE: Record<string, ColorPalette> = {
   Grayscale: "Grayscale",
   CGA: "CGA",
@@ -241,26 +197,6 @@ const BACKEND_TO_FRONTEND_PALETTE: Record<string, ColorPalette> = {
   "ZX Spectrum": "ZX Spectrum",
   "Commodore 64": "C64",
   "Apple II": "Apple II",
-};
-
-const toBackendPaletteName = (palette: ColorPalette) => FRONTEND_TO_BACKEND_PALETTE[palette] ?? palette;
-
-const DEFAULT_TEMPORAL: AnimationTemporalConfig = {
-  enabled: true,
-  mode: "sine",
-  amount: 20,
-  speed: 1,
-  phase: 0,
-};
-
-const DEFAULT_TRACK: AnimationTrackDraft = {
-  parameter: "temporal-amount",
-  from: 0,
-  to: 60,
-  startFrame: 0,
-  endFrame: 17,
-  easing: "ease-in-out",
-  looped: false,
 };
 
 // Keep preview close to source fidelity so inspector tuning matches final render.
@@ -577,6 +513,8 @@ const Index = () => {
   const [scanlineGap, setScanlineGap] = useState(2);
   const [flicker, setFlicker] = useState(16);
   const [curvature, setCurvature] = useState(12);
+  const [maskTarget, setMaskTarget] = useState<"all" | "edges" | "highlights" | "midtones" | "shadows">("all");
+  const [maskFeather, setMaskFeather] = useState(0.2);
   const [showAbout, setShowAbout] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showPresetManager, setShowPresetManager] = useState(false);
@@ -594,29 +532,18 @@ const Index = () => {
   const [videoPreviewBusy, setVideoPreviewBusy] = useState(false);
   const [videoDeps, setVideoDeps] = useState<DependencyStatusResponse | null>(null);
   const [shareablePatternAlgorithms, setShareablePatternAlgorithms] = useState<string[]>([]);
-  const [temporalModes, setTemporalModes] = useState<string[]>([DEFAULT_TEMPORAL.mode]);
-  const [easingModes, setEasingModes] = useState<string[]>([DEFAULT_TRACK.easing]);
-  const [parameterModes, setParameterModes] = useState<string[]>([DEFAULT_TRACK.parameter]);
-  const [animationTemporal, setAnimationTemporal] = useState<AnimationTemporalConfig>(DEFAULT_TEMPORAL);
-  const [animationTrack, setAnimationTrack] = useState<AnimationTrackDraft>(DEFAULT_TRACK);
-  const [animationRenderMode, setAnimationRenderMode] = useState<"quick" | "rendered">("quick");
-  const [animationQuickStride, setAnimationQuickStride] = useState(2);
-  const [animationFrames, setAnimationFrames] = useState<number[][]>([]);
-  const [animationFrameIndices, setAnimationFrameIndices] = useState<number[]>([]);
-  const [animationFrameSize, setAnimationFrameSize] = useState<{ width: number; height: number } | null>(null);
-  const [selectedAnimationFrame, setSelectedAnimationFrame] = useState(0);
-  const [animationPlaying, setAnimationPlaying] = useState(false);
+  // ── Unified filmstrip state ────────────────────────────────────────────────
+  const [frames, setFrames] = useState<AnimationFrame[]>([]);
+  const [selectedFrameIndex, setSelectedFrameIndex] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
   const [animationPreviewFps, setAnimationPreviewFps] = useState(12);
   const [animationPreviewSpeed, setAnimationPreviewSpeed] = useState(1);
-  const [animationEditorFrames, setAnimationEditorFrames] = useState<AnimationEditorFrame[]>([]);
-  const [selectedEditorFrameIndex, setSelectedEditorFrameIndex] = useState(0);
-  const [editorPreviewPlaying, setEditorPreviewPlaying] = useState(false);
-  const [pipelineStack, setPipelineStack] = useState<PipelineStackEntry[]>([{
-    id: "layer-main",
-    label: "Floyd-Steinberg",
-    visible: true,
-    effectLayer: {},
-  }]);
+  const [selectedFrameIds, setSelectedFrameIds] = useState<Set<string>>(new Set());
+  const [layers, setLayers] = useState<Layer[]>(() => [createDefaultLayer("Layer 1")]);
+  const [activeLayerId, setActiveLayerId] = useState<string>(() => layers[0]?.id ?? "");
+
+  /** Full-resolution source RGBA cache for video-extracted frames. */
+  const sourceRgbaMapRef = useRef<Map<string, Uint8ClampedArray>>(new Map());
   const [jobId, setJobId] = useState<string | null>(null);
   const [jobKind, setJobKind] = useState<"video" | "animation" | null>(null);
   const [jobProgress, setJobProgress] = useState<VideoJobProgressResponse | null>(null);
@@ -630,9 +557,12 @@ const Index = () => {
   const presetImportInputRef = useRef<HTMLInputElement>(null);
   const jobPollMissesRef = useRef(0);
   const previewRequestIdRef = useRef(0);
-  // Debounce timer: prevents firing a backend render on every slider tick.
-  // The timer resets on each state change and fires 180 ms after the last one.
-  const previewDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const framesRef = useRef<AnimationFrame[]>(frames);
+  framesRef.current = frames;
+  const layersRef = useRef<Layer[]>(layers);
+  layersRef.current = layers;
+  const activeLayerIdRef = useRef(activeLayerId);
+  activeLayerIdRef.current = activeLayerId;
   const { processImage } = useImageWorker();
 
   // Maximum dimension (px) used for live preview. High-res images are downscaled
@@ -649,7 +579,6 @@ const Index = () => {
   const deferredContrast = useDeferredValue(contrast);
   const deferredBrightness = useDeferredValue(brightness);
   const deferredSaturation = useDeferredValue(saturation);
-  const deferredPixelSize = useDeferredValue(pixelSize);
   const deferredBlur = useDeferredValue(blur);
   const deferredSharpness = useDeferredValue(sharpness);
   const deferredNoise = useDeferredValue(noise);
@@ -680,6 +609,94 @@ const Index = () => {
   const deferredSnapGlitchToPalette = useDeferredValue(snapGlitchToPalette);
   const deferredPaletteMix = useDeferredValue(paletteMix);
   const deferredGlobalSeed = useDeferredValue(globalSeed);
+  const deferredMaskTarget = useDeferredValue(maskTarget);
+  const deferredMaskFeather = useDeferredValue(maskFeather);
+
+  const editorControlValues = useMemo(() => ({
+    algorithm,
+    palette,
+    intensity,
+    contrast,
+    brightness,
+    saturation,
+    pixelSize,
+    blur,
+    sharpness,
+    noise,
+    blendMode,
+    layerOpacity,
+    glitchType,
+    pixelSortMetric,
+    pixelSortMask,
+    thresholdMin,
+    thresholdMax,
+    angle,
+    sortLength,
+    blockSize,
+    chaos,
+    quantization,
+    redShiftX,
+    redShiftY,
+    greenShiftX,
+    greenShiftY,
+    blueShiftX,
+    blueShiftY,
+    globalRgbShiftIntensity,
+    sliceCount,
+    maxOffset,
+    randomness,
+    scanlineThickness,
+    scanlineGap,
+    flicker,
+    curvature,
+    snapGlitchToPalette,
+    globalSeed,
+    paletteMix,
+    maskTarget,
+    maskFeather,
+  }), [
+    algorithm,
+    palette,
+    intensity,
+    contrast,
+    brightness,
+    saturation,
+    pixelSize,
+    blur,
+    sharpness,
+    noise,
+    blendMode,
+    layerOpacity,
+    glitchType,
+    pixelSortMetric,
+    pixelSortMask,
+    thresholdMin,
+    thresholdMax,
+    angle,
+    sortLength,
+    blockSize,
+    chaos,
+    quantization,
+    redShiftX,
+    redShiftY,
+    greenShiftX,
+    greenShiftY,
+    blueShiftX,
+    blueShiftY,
+    globalRgbShiftIntensity,
+    sliceCount,
+    maxOffset,
+    randomness,
+    scanlineThickness,
+    scanlineGap,
+    flicker,
+    curvature,
+    snapGlitchToPalette,
+    globalSeed,
+    paletteMix,
+    maskTarget,
+    maskFeather,
+  ]);
 
   const activeAdjustments = [
     algorithm !== "None" && intensity !== 100,
@@ -724,7 +741,7 @@ const Index = () => {
   const canRenderVideo = Boolean(videoDeps?.ffmpeg_available && videoDeps?.ffprobe_available);
   const videoRenderBlockedReason = canRenderVideo
     ? undefined
-    : "FFmpeg/FFprobe не найдены. Видео-рендер отключён до установки зависимостей.";
+    : "FFmpeg/FFprobe not found. Video render disabled.";
 
   const handleOpenFile = useCallback(() => {
     if (workspaceMode === "video") {
@@ -790,30 +807,6 @@ const Index = () => {
         setShareablePatternAlgorithms(patternAlgorithms);
       }
 
-      if (temporalModeList?.length) {
-        setTemporalModes(temporalModeList);
-        setAnimationTemporal((prev) => ({
-          ...prev,
-          mode: temporalModeList.includes(prev.mode) ? prev.mode : temporalModeList[0],
-        }));
-      }
-
-      if (easingModeList?.length) {
-        setEasingModes(easingModeList);
-        setAnimationTrack((prev) => ({
-          ...prev,
-          easing: easingModeList.includes(prev.easing) ? prev.easing : easingModeList[0],
-        }));
-      }
-
-      if (parameterModeList?.length) {
-        setParameterModes(parameterModeList);
-        setAnimationTrack((prev) => ({
-          ...prev,
-          parameter: parameterModeList.includes(prev.parameter) ? prev.parameter : parameterModeList[0],
-        }));
-      }
-
       setBackendConnected(true);
       setStatus((prev) => (prev === "Ready" ? "Backend catalog synced" : prev));
     };
@@ -836,7 +829,7 @@ const Index = () => {
           deps.ffprobe_available ? null : "ffprobe",
         ].filter(Boolean).join(", ");
 
-        toast.error(`Не найдены зависимости для видео: ${details}. Кнопка Render Video отключена.`);
+        toast.error(`Video dependencies not found: ${details}. Render Video is disabled.`);
       }
     };
 
@@ -939,11 +932,7 @@ const Index = () => {
     void buildPreview();
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    // Auto-detect video files and route them to video workflow
+  const handleFile = useCallback((file: File) => {
     if (file.type.startsWith("video/")) {
       setWorkspaceMode("video");
       handleVideoFile(file);
@@ -955,7 +944,6 @@ const Index = () => {
       const img = new Image();
       img.onload = () => {
         const frameSrc = event.target?.result as string;
-
         const quantizeCanvas = document.createElement("canvas");
         quantizeCanvas.width = 128;
         quantizeCanvas.height = 128;
@@ -968,7 +956,6 @@ const Index = () => {
             Math.max(2, quantizationColorCount),
             quantizationMethod,
           );
-
           if (sampled.length >= 2) {
             const sampledHex = sampled.map(rgbToHex);
             setCustomColors(sampledHex);
@@ -976,29 +963,27 @@ const Index = () => {
             setPalette("Custom");
           }
         }
-
         setSourceImageFile(file);
         setOriginalImage(img);
         setProcessedImage(null);
-        setAnimationFrames([]);
-        setAnimationFrameIndices([]);
-        setSelectedAnimationFrame(0);
-        setAnimationEditorFrames([
-          {
-            id: makeFrameId(),
-            src: frameSrc,
-            width: img.width,
-            height: img.height,
-          },
-        ]);
-        setSelectedEditorFrameIndex(0);
-        setEditorPreviewPlaying(false);
-        setImageSize(`${img.width}×${img.height}`);
+        // Clear frames so the animation auto-populate effect creates a fresh
+        // first frame with the CURRENT settings (not DEFAULT_FRAME_SETTINGS).
+        setFrames([]);
+        setSelectedFrameIndex(0);
+        setIsPlaying(false);
+        setImageSize(`${img.width}\u00d7${img.height}`);
         setStatus("Image loaded (palette sampled from source)");
       };
       img.src = event.target?.result as string;
     };
     reader.readAsDataURL(file);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quantizationColorCount, quantizationMethod]);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    handleFile(file);
   };
 
   const handleVideoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1007,176 +992,223 @@ const Index = () => {
     handleVideoFile(file);
   };
 
-  const buildEffectLayerPayloadFromValues = useCallback((
-    algorithmValue: DitheringAlgorithm,
-    paletteValue: ColorPalette,
-    intensityValue: number,
-    contrastValue: number,
-    brightnessValue: number,
-    saturationValue: number,
-    pixelSizeValue: number,
-    blurValue: number,
-    sharpnessValue: number,
-    noiseValue: number,
-  ): EffectLayerPayload => {
-    const common = {
-      id: "layer-main",
-      algorithm: algorithmValue,
-      enabled: true,
-      intensity: intensityValue,
-      blend_mode: blendMode,
-      opacity: layerOpacity / 100,
-      contrast: contrastValue,
-      brightness: brightnessValue,
-      saturation: saturationValue,
-      pixel_size: pixelSizeValue,
-      blur: blurValue,
-      sharpness: sharpnessValue,
-      noise: noiseValue,
-      glitch_type: deferredGlitchType,
-      sort_by: deferredPixelSortMetric,
-      masking: deferredPixelSortMask,
-      threshold_min: deferredThresholdMin,
-      threshold_max: deferredThresholdMax,
-      direction_angle: deferredAngle,
-      sort_length: deferredSortLength,
-      block_size: deferredBlockSize,
-      chaos: deferredChaos,
-      quantization: deferredQuantization,
-      red_shift_x: deferredRedShiftX,
-      red_shift_y: deferredRedShiftY,
-      green_shift_x: deferredGreenShiftX,
-      green_shift_y: deferredGreenShiftY,
-      blue_shift_x: deferredBlueShiftX,
-      blue_shift_y: deferredBlueShiftY,
-      global_rgb_shift_intensity: deferredGlobalRgbShiftIntensity,
-      slice_count: deferredSliceCount,
-      max_offset: deferredMaxOffset,
-      randomness: deferredRandomness,
-      scanline_thickness: deferredScanlineThickness,
-      scanline_gap: deferredScanlineGap,
-      flicker: deferredFlicker,
-      curvature: deferredCurvature,
-      snap_to_palette: deferredSnapGlitchToPalette,
-      palette_mix: deferredPaletteMix,
-      global_seed: deferredGlobalSeed,
-    } satisfies EffectLayerPayload;
+  const {
+    captureEffectParams,
+    applyEffectParams,
+    handleUndo,
+    handleRedo,
+  } = useEditorControlSync({
+    values: editorControlValues,
+    setters: {
+      setAlgorithm,
+      setPalette,
+      setIntensity,
+      setContrast,
+      setBrightness,
+      setSaturation,
+      setPixelSize,
+      setBlur,
+      setSharpness,
+      setNoise,
+      setBlendMode,
+      setLayerOpacity,
+      setGlitchType,
+      setPixelSortMetric,
+      setPixelSortMask,
+      setThresholdMin,
+      setThresholdMax,
+      setAngle,
+      setSortLength,
+      setBlockSize,
+      setChaos,
+      setQuantization,
+      setRedShiftX,
+      setRedShiftY,
+      setGreenShiftX,
+      setGreenShiftY,
+      setBlueShiftX,
+      setBlueShiftY,
+      setGlobalRgbShiftIntensity,
+      setSliceCount,
+      setMaxOffset,
+      setRandomness,
+      setScanlineThickness,
+      setScanlineGap,
+      setFlicker,
+      setCurvature,
+      setSnapGlitchToPalette,
+      setGlobalSeed,
+      setPaletteMix,
+      setMaskTarget,
+      setMaskFeather,
+    },
+  });
 
-    if (paletteValue === "Custom") {
-      const customPalette = customColors
-        .map(hexToRgb)
-        .filter((color): color is [number, number, number] => color !== null);
+  const persistCurrentLayersToFrame = useCallback((nextLayers: Layer[], nextActiveLayerId = activeLayerIdRef.current) => {
+    if (framesRef.current.length === 0) return;
 
-      return {
-        ...common,
-        palette: customPalette,
-      };
+    const snapshot = cloneLayers(nextLayers);
+    const targetIndex = Math.max(0, Math.min(selectedFrameIndex, framesRef.current.length - 1));
+    const targetFrame = framesRef.current[targetIndex];
+
+    layersRef.current = snapshot;
+    activeLayerIdRef.current = nextActiveLayerId;
+    framesRef.current = framesRef.current.map((frame, index) => (
+      index === targetIndex
+        ? {
+            ...frame,
+            layers: snapshot,
+            activeLayerId: nextActiveLayerId,
+            isKeyframe: true,
+          }
+        : frame
+    ));
+
+    setFrames((prev) => prev.map((frame, index) => (
+      index === targetIndex
+        ? {
+            ...frame,
+            layers: snapshot,
+            activeLayerId: nextActiveLayerId,
+            isKeyframe: true,
+          }
+        : frame
+    )));
+    if (targetFrame) {
+      void renderFramePreview(targetFrame.id, snapshot);
     }
+  }, [selectedFrameIndex]);
 
-    return {
-      ...common,
-      palette_name: toBackendPaletteName(paletteValue),
-    };
-  }, [blendMode, customColors, deferredAngle, deferredBlockSize, deferredBlueShiftX, deferredBlueShiftY, deferredChaos, deferredCurvature, deferredFlicker, deferredGlobalRgbShiftIntensity, deferredGlobalSeed, deferredGreenShiftX, deferredGreenShiftY, deferredGlitchType, layerOpacity, deferredMaxOffset, deferredPaletteMix, deferredPixelSortMask, deferredPixelSortMetric, deferredQuantization, deferredRandomness, deferredRedShiftX, deferredRedShiftY, deferredScanlineGap, deferredScanlineThickness, deferredSliceCount, deferredSnapGlitchToPalette, deferredSortLength, deferredThresholdMax, deferredThresholdMin]);
+  const activeLayersPayload = useMemo(() => {
+    const mergedLayers = layers.map((layer) => (
+      layer.id === activeLayerId
+        ? {
+            ...layer,
+            settings: {
+              ...layer.settings,
+              ...editorControlValues,
+            },
+          }
+        : layer
+    ));
 
-  // buildEffectLayerPayload uses deferred values for all parameters so that
-  // activeLayersPayload (and therefore the preview render) only updates when
-  // React has finished scheduling — not on every individual slider tick.
-  const buildEffectLayerPayload = useCallback((): EffectLayerPayload => buildEffectLayerPayloadFromValues(
-    deferredAlgorithm,
-    deferredPalette,
-    deferredIntensity,
-    deferredContrast,
-    deferredBrightness,
-    deferredSaturation,
-    deferredPixelSize,
-    deferredBlur,
-    deferredSharpness,
-    deferredNoise,
-  ), [buildEffectLayerPayloadFromValues, deferredAlgorithm, deferredBlur, deferredBrightness, deferredContrast, deferredIntensity, deferredNoise, deferredPalette, deferredPixelSize, deferredSaturation, deferredSharpness]);
+    return buildBackendLayersPayload(mergedLayers, customPaletteRgb);
+  }, [activeLayerId, customPaletteRgb, editorControlValues, layers]);
 
-  /**
-   * The ordered list of layers sent to the Rust backend for every render.
-   * The first entry in pipelineStack ("layer-main") always uses the current
-   * ControlPanel state computed live by buildEffectLayerPayload — no async
-   * sync needed. Additional entries use their stored effectLayer snapshot.
-   */
-  const activeLayersPayload = useMemo((): EffectLayerPayload[] => {
-    const currentMain = buildEffectLayerPayload();
-    return pipelineStack
-      .filter((e) => e.visible)
-      .map((e) =>
-        e.id === "layer-main"
-          ? { ...currentMain }
-          : (e.effectLayer as EffectLayerPayload),
-      );
-  }, [buildEffectLayerPayload, pipelineStack]);
+  const applyLayerSnapshotToControls = useCallback((layerSnapshot: Layer | null) => {
+    if (!layerSnapshot) return;
+    setActiveLayerId(layerSnapshot.id);
+    applyEffectParams(layerSnapshot.settings ?? DEFAULT_FRAME_SETTINGS);
+  }, [applyEffectParams]);
 
-  /**
-   * The display stack passed to PipelinePanel — same as pipelineStack but
-   * with the main layer's label kept in sync with the current algorithm.
-   */
-  const displayPipelineStack = useMemo((): PipelineStackEntry[] =>
-    pipelineStack.map((e, i) => ({
-      ...e,
-      label: i === 0 ? algorithm : e.label,
-    })),
-    [algorithm, pipelineStack],
-  );
+  const commitControlsToActiveEffect = useCallback((): Layer[] | null => {
+    const settings = captureEffectParams();
+    const currentLayerId = activeLayerIdRef.current;
 
-  // ─── Pipeline stack handlers ───────────────────────────────────────────────
-
-  const handlePipelineReorder = useCallback(async (fromIndex: number, toIndex: number) => {
-    if (fromIndex === toIndex) return;
-    const stackSnapshot = pipelineStack;
-    setPipelineStack((prev) => {
-      const next = [...prev];
-      const [moved] = next.splice(fromIndex, 1);
-      if (moved === undefined) return prev;
-      next.splice(toIndex, 0, moved);
-      return next;
+    const next = layersRef.current.map((layer) => {
+      if (layer.id !== currentLayerId) return cloneLayer(layer);
+      return {
+        ...cloneLayer(layer),
+        settings: { ...settings },
+      };
     });
-    const visibleLayers = stackSnapshot
-      .filter((e) => e.visible)
-      .map((e): EffectLayerPayload =>
-        e.id === "layer-main"
-          ? buildEffectLayerPayload()
-          : (e.effectLayer as EffectLayerPayload),
-      );
-    void safeTauriInvoke("reorder_effect_layers", {
-      request: { layers: visibleLayers, from_index: fromIndex, to_index: toIndex },
-    });
-  }, [buildEffectLayerPayload, pipelineStack]);
 
-  const handlePipelineToggleVisible = useCallback((id: string) => {
-    setPipelineStack((prev) => prev.map((e) => e.id === id ? { ...e, visible: !e.visible } : e));
-  }, []);
+    setLayers(next);
+    persistCurrentLayersToFrame(next, currentLayerId);
+    return next;
+  }, [captureEffectParams, persistCurrentLayersToFrame]);
 
-  const handlePipelineRemoveLayer = useCallback((id: string) => {
-    setPipelineStack((prev) => {
-      if (prev.length <= 1) return prev;
-      return prev.filter((e) => e.id !== id);
-    });
-  }, []);
-
-  const handlePipelineAddLayer = useCallback((algorithmValue: string, paletteValue: string) => {
-    const id = `layer-${Date.now()}`;
-    const newEntry: PipelineStackEntry = {
-      id,
-      label: algorithmValue,
-      visible: true,
-      effectLayer: {
-        id,
-        algorithm: algorithmValue,
-        enabled: true,
-        intensity: 100,
-        palette_name: toBackendPaletteName(paletteValue as ColorPalette),
-      },
-    };
-    setPipelineStack((prev) => [...prev, newEntry]);
-  }, []);
+  const {
+    handleSelectLayer,
+    handleToggleLayerVisibility,
+    handleToggleLayerLock,
+    handleAddLayer,
+    handleDuplicateLayer,
+    handleRemoveLayer,
+    handleMoveLayer,
+  } = useLayerSession({
+    layersRef,
+    activeLayerIdRef,
+    setLayers,
+    setActiveLayerId,
+    commitControlsToActiveEffect,
+    applyLayerSnapshotToControls,
+    persistCurrentLayersToFrame,
+  });
 
   // ──────────────────────────────────────────────────────────────────────────
+
+  const renderFramePreview = useCallback(async (
+    frameId: string,
+    snapshotLayers?: Layer[],
+    sourceImage?: HTMLImageElement | null,
+  ): Promise<string | null> => {
+    const frame = framesRef.current.find((item) => item.id === frameId) ?? null;
+    if (!frame) return null;
+
+    try {
+      const image = sourceImage ?? await loadImageFromSrc(frame.src);
+      const rgbaFrame = await imageToRgbaFrame(image, MAX_PREVIEW_PX);
+      const payload = buildBackendLayersPayload(snapshotLayers ?? frame.layers, customPaletteRgb);
+
+      const imageData = new ImageData(
+        new Uint8ClampedArray(rgbaFrame.rgba),
+        rgbaFrame.width,
+        rgbaFrame.height,
+      );
+
+      const { buffer, width, height } = await processImage(imageData, payload);
+
+      const previewImage = await rgbaToImage(new Uint8ClampedArray(buffer), width, height);
+      const previewDataUrl = previewImage.src;
+
+      setFrames((prev) => prev.map((item) => (
+        item.id === frameId
+          ? { ...item, previewDataUrl }
+          : item
+      )));
+
+      if (framesRef.current[selectedFrameIndex]?.id === frameId) {
+        setProcessedImage(previewImage);
+      }
+
+      return previewDataUrl;
+    } catch (error) {
+      console.error("Failed to render frame preview", error);
+      return null;
+    }
+  }, [customPaletteRgb, processImage, selectedFrameIndex]);
+
+  const {
+    handleAddFrameClone,
+    handleImportAnimationFrame,
+    handleDeleteSelectedFrame,
+    handleSelectFrame,
+    handleMultiSelectFrame,
+    handleApplyToSelected,
+    handleInterpolateSelected,
+    handleToggleKeyframe,
+  } = useFilmstripSession({
+    workspaceMode,
+    framesRef,
+    layersRef,
+    activeLayerIdRef,
+    selectedFrameIndex,
+    selectedFrameIds,
+    frames,
+    setFrames,
+    setSelectedFrameIndex,
+    setSelectedFrameIds,
+    setLayers,
+    setActiveLayerId,
+    setIsPlaying,
+    setShowOriginal,
+    setStatus,
+    commitControlsToActiveEffect,
+    applyLayerSnapshotToControls,
+    renderFramePreview,
+    videoSource,
+  });
 
   const renderInspectorPreview = useCallback(async (
     sourceImage: HTMLImageElement,
@@ -1189,11 +1221,8 @@ const Index = () => {
     try {
       let previewImage: HTMLImageElement | null = null;
 
-      // Always use Rust backend via packed frame route (same engine as final render).
-      // Cap at MAX_PREVIEW_PX to keep IPC payload small for large source images.
       const frame = await imageToRgbaFrame(sourceImage, MAX_PREVIEW_PX);
       const frameSize = frame.width * frame.height * 4;
-      // Skip backend call when there are no layers — backend rejects empty layer stack.
       const packedResult = activeLayersPayload.length > 0
         ? await safeTauriInvoke<ProcessVideoFramesPackedResponse>(
             "process_video_frames_packed",
@@ -1217,7 +1246,6 @@ const Index = () => {
       }
 
       if (!previewImage) {
-        // Fallback: no backend connection — run through local pipeline worker
         const canvas = document.createElement("canvas");
         canvas.width = sourceImage.width;
         canvas.height = sourceImage.height;
@@ -1225,13 +1253,12 @@ const Index = () => {
         if (!ctx) throw new Error("Failed to create canvas context for preview");
         ctx.drawImage(sourceImage, 0, 0);
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const { buffer, width, height } = await processImage(imageData, activeLayersPayload, deferredPixelSize);
+        const { buffer, width, height } = await processImage(imageData, activeLayersPayload);
         previewImage = await rgbaToImage(new Uint8ClampedArray(buffer), width, height);
       }
 
       if (requestId !== previewRequestIdRef.current) return;
       setProcessedImage(previewImage);
-      setShowOriginal(false);
       setStatus("Ready");
     } catch (error) {
       if (requestId !== previewRequestIdRef.current) return;
@@ -1240,30 +1267,218 @@ const Index = () => {
     } finally {
       setPreviewProcessing(false);
     }
-  }, [activeLayersPayload, deferredPixelSize, processImage]);
+  }, [activeLayersPayload, processImage]);
 
-  const buildAnimationTracksPayload = useCallback(
-    (frameCount: number) => {
-      if (!animationTrack || frameCount <= 0) return [];
-      // Rust AnimationParameter uses #[serde(tag = "type")] — must be an object, not a string.
-      const parameter = typeof animationTrack.parameter === "string"
-        ? { type: animationTrack.parameter }
-        : animationTrack.parameter;
-      return [
-        {
-          id: `track-${Date.now()}`,
-          parameter,
-          from: animationTrack.from,
-          to: animationTrack.to,
-          start_frame: animationTrack.startFrame,
-          end_frame: Math.min(animationTrack.endFrame, frameCount - 1),
-          easing: animationTrack.easing,
-          looped: animationTrack.looped,
+  usePreviewOrchestration({
+    originalImage,
+    workspaceMode,
+    isPlaying,
+    videoPreviewBusy,
+    activeLayersPayload,
+    processImage,
+    renderInspectorPreview,
+    setProcessedImage,
+    setShowOriginal,
+    setStatus,
+    setPreviewProcessing,
+    maxPreviewPx: MAX_PREVIEW_PX,
+  });
+
+  const handleToggleAnimationPlayback = useCallback(() => {
+    if (workspaceMode !== "animation") return;
+    if (frames.length <= 1) {
+      toast.error("Add at least 2 frames to preview animation");
+      return;
+    }
+    setIsPlaying((prev) => {
+      const next = !prev;
+      if (next) {
+        setShowOriginal(false);
+      }
+      return next;
+    });
+  }, [frames.length, workspaceMode]);
+
+  /** Save current settings to this frame and mark it as a keyframe. */
+  const handleApplyEffectToSelectedFrame = useCallback(() => {
+    const committedLayers = commitControlsToActiveEffect() ?? cloneLayers(layersRef.current);
+    setFrames((prev) =>
+      prev.map((f, i) =>
+        i === selectedFrameIndex
+          ? {
+              ...f,
+              layers: cloneLayers(committedLayers),
+              activeLayerId: activeLayerIdRef.current,
+              isKeyframe: true,
+            }
+          : f,
+      ),
+    );
+    setStatus(`Layer snapshot saved to frame ${selectedFrameIndex + 1} (keyframe)`);
+    toast.success(`Frame ${selectedFrameIndex + 1} marked as keyframe`);
+  }, [commitControlsToActiveEffect, selectedFrameIndex]);
+
+  /**
+   * Export animation: render each frame with its params, then export as GIF.
+   */
+  const handleExportAnimation = useCallback(async () => {
+    if (!frames.length) {
+      toast.error("No frames to render");
+      return;
+    }
+
+    const committedLayers = commitControlsToActiveEffect() ?? cloneLayers(layersRef.current);
+    const framesWithCurrentSaved = frames.map((f, i) =>
+      i === selectedFrameIndex
+        ? {
+            ...f,
+            layers: cloneLayers(committedLayers),
+            activeLayerId: activeLayerIdRef.current,
+          }
+        : f,
+    );
+
+    setWorkflowBusy(true);
+    setJobKind("animation");
+    setStatus("Rendering frames...");
+    const renderedRgbaFrames: Array<{ rgba: Uint8ClampedArray; width: number; height: number }> = [];
+
+    for (let i = 0; i < framesWithCurrentSaved.length; i++) {
+      const frame = framesWithCurrentSaved[i]!;
+      setWorkflowStatus(`Rendering frame ${i + 1} / ${framesWithCurrentSaved.length}`);
+
+      try {
+        let sourceData: { width: number; height: number; rgba: Uint8ClampedArray };
+
+        const cached = sourceRgbaMapRef.current.get(frame.id);
+        if (cached) {
+          sourceData = { width: frame.width, height: frame.height, rgba: cached };
+        } else if (frame.sourceTimestamp !== undefined && videoSource) {
+          const extracted = await extractSingleVideoFrame(videoSource, frame.sourceTimestamp);
+          sourceRgbaMapRef.current.set(frame.id, extracted.rgba);
+          sourceData = extracted;
+        } else {
+          const img = await loadImageFromSrc(frame.src);
+          const rgbaFrame = await imageToRgbaFrame(img);
+          sourceData = rgbaFrame;
+        }
+
+        const frameLayersPayload = buildBackendLayersPayload(frame.layers, customPaletteRgb);
+        const imageData = new ImageData(
+          new Uint8ClampedArray(sourceData.rgba),
+          sourceData.width,
+          sourceData.height,
+        );
+        const { buffer, width, height } = await processImage(imageData, frameLayersPayload);
+        renderedRgbaFrames.push({ rgba: new Uint8ClampedArray(buffer), width, height });
+      } catch (err) {
+        console.error(`Frame ${i + 1} render failed`, err);
+        toast.error(`Frame ${i + 1} failed, using original`);
+        const img = await loadImageFromSrc(frame.src);
+        const fallback = await imageToRgbaFrame(img);
+        renderedRgbaFrames.push(fallback);
+      }
+    }
+
+    const refFrame = renderedRgbaFrames[0];
+    if (!refFrame) { setWorkflowBusy(false); return; }
+    const { width, height } = refFrame;
+
+    try {
+      const exported = await safeTauriInvoke<ExportVideoFramesResponse>("export_video_frames", {
+        request: {
+          name: "animation",
+          width,
+          height,
+          frames: renderedRgbaFrames.map((item) => Array.from(item.rgba)),
+          format: "gif",
+          fps: Math.max(1, animationPreviewFps * animationPreviewSpeed),
         },
-      ];
-    },
-    [animationTrack],
-  );
+      });
+
+      if (!exported) {
+        toast.error("Export unavailable in this runtime");
+        setStatus("Export unavailable");
+        return;
+      }
+
+      const savedPath = await saveExportedBytes(exported.file_name, exported.bytes, "image/gif");
+      if (savedPath) {
+        setJobOutputPath(savedPath);
+        setWorkflowStatus(`Animation GIF saved: ${savedPath}`);
+      }
+      setStatus(`Exported GIF with ${framesWithCurrentSaved.length} frames`);
+      toast.success(savedPath ? `Saved ${savedPath}` : `Exported ${exported.file_name}`);
+    } catch (error) {
+      console.error("Failed to export animation", error);
+      setStatus("Export failed");
+      toast.error("Failed to export animation");
+    } finally {
+      setWorkflowBusy(false);
+    }
+  }, [animationPreviewFps, animationPreviewSpeed, commitControlsToActiveEffect, customPaletteRgb, frames, layersRef, processImage, selectedFrameIndex, videoSource]);
+
+  const handleRunVideoWorkflow = useCallback(async () => {
+    if (workspaceMode !== "video") return;
+    if (!videoSource) {
+      toast.error("Load a video first");
+      return;
+    }
+
+    setWorkflowBusy(true);
+    setJobKind("video");
+    setStatus("Submitting video workflow...");
+
+    try {
+      const nativePath = getNativeFilePath(videoSource);
+      const sourceExtension = videoSource.name.split(".").pop() || "mp4";
+      const outputPath = await safeTauriInvoke<string>("get_default_output_path", {
+        fileName: `dither-yuki-video-${Date.now()}.${sourceExtension}`,
+      });
+
+      const requestBase = {
+        layers: activeLayersPayload,
+        temporal: { enabled: false, mode: "sine", amount: 0, speed: 1, phase: 0 },
+        tracks: [],
+        keep_audio: true,
+      };
+
+      const queuedJobId = nativePath
+        ? await safeTauriInvoke<string>("process_video_file", {
+            request: {
+              input_path: nativePath,
+              output_path: outputPath,
+              ...requestBase,
+            },
+          })
+        : await safeTauriInvoke<string>("process_video_file_bytes", {
+            request: {
+              original_name: videoSource.name,
+              file_bytes: new Uint8Array(await videoSource.arrayBuffer()),
+              output_path: outputPath,
+              ...requestBase,
+            },
+          });
+
+      if (queuedJobId) {
+        setJobId(queuedJobId);
+        setJobOutputPath(outputPath ?? null);
+        setWorkflowStatus("Video job queued in backend render pipeline");
+        return;
+      }
+
+      setWorkflowStatus("Video workflow command failed (backend reachable, but job queue command returned no result)");
+      setStatus("Video workflow command failed");
+      toast.error("Video backend command failed. Check app logs and FFmpeg setup.");
+      setWorkflowBusy(false);
+    } catch (error) {
+      console.error("Video workflow failed", error);
+      setWorkflowStatus("Video workflow failed");
+      setStatus("Video workflow error");
+      setWorkflowBusy(false);
+      toast.error("Failed to run video workflow");
+    }
+  }, [activeLayersPayload, videoSource, workspaceMode]);
 
   const handleCancelActiveJob = useCallback(async () => {
     if (!jobId) {
@@ -1278,465 +1493,16 @@ const Index = () => {
     }
   }, [jobId]);
 
-  const handleRunVideoWorkflow = useCallback(async () => {
-    if (!videoSource) {
-      toast.error("Choose a video source first");
-      return;
-    }
-
-    if (!backendConnected) {
-      setWorkflowStatus("Backend unavailable: run inside Tauri desktop runtime (.app / tauri dev)");
-      setStatus("Video workflow unavailable");
-      toast.error("Video backend is not connected. Launch the desktop app runtime.");
-      return;
-    }
-
-    if (!canRenderVideo) {
-      const reason = videoRenderBlockedReason ?? "FFmpeg/FFprobe are missing";
-      setWorkflowStatus(`Video workflow blocked: ${reason}`);
-      setStatus("Video workflow blocked");
-      toast.error(reason);
-      return;
-    }
-
-    setWorkflowBusy(true);
-    setJobKind("video");
-    setJobProgress(null);
-    setJobOutputPath(null);
-    setStatus("Processing video workflow...");
-
-    try {
-      const nativePath = getNativeFilePath(videoSource);
-      const sourceExtension = deriveVideoOutputExtension(nativePath ?? videoSource.name);
-      if (nativePath) {
-        const outputPath = buildSiblingOutputPath(nativePath, "dithered", sourceExtension);
-        setWorkflowStatus("Submitting backend video job...");
-
-        const queuedJobId = await safeTauriInvoke<string>("process_video_file", {
-          request: {
-            input_path: nativePath,
-            output_path: outputPath,
-            layers: activeLayersPayload,
-            temporal: {
-              enabled: animationTemporal.enabled,
-              mode: animationTemporal.mode,
-              amount: animationTemporal.amount,
-              speed: animationTemporal.speed,
-              phase: animationTemporal.phase,
-            },
-            tracks: buildAnimationTracksPayload(Math.max(videoMetadata?.estimated_frame_count ?? 0, 1)),
-            keep_audio: true,
-          },
-        });
-
-        if (queuedJobId) {
-          setJobId(queuedJobId);
-          setJobOutputPath(outputPath);
-          setWorkflowStatus("Video job queued in backend render pipeline");
-          return;
-        }
-      }
-
-      const fallbackOutputPath = await safeTauriInvoke<string>("get_default_output_path", {
-        fileName: `dither-yuki-video-${Date.now()}.${sourceExtension}`,
-      });
-
-      if (fallbackOutputPath) {
-        setWorkflowStatus("Submitting backend video job from uploaded bytes...");
-        const fileBytes = new Uint8Array(await videoSource.arrayBuffer());
-        const queuedFromBytes = await safeTauriInvoke<string>("process_video_file_bytes", {
-          request: {
-            original_name: videoSource.name,
-            file_bytes: fileBytes,
-            output_path: fallbackOutputPath,
-            layers: activeLayersPayload,
-            temporal: {
-              enabled: animationTemporal.enabled,
-              mode: animationTemporal.mode,
-              amount: animationTemporal.amount,
-              speed: animationTemporal.speed,
-              phase: animationTemporal.phase,
-            },
-            tracks: buildAnimationTracksPayload(Math.max(videoMetadata?.estimated_frame_count ?? 0, 1)),
-            keep_audio: true,
-          },
-        });
-
-        if (queuedFromBytes) {
-          setJobId(queuedFromBytes);
-          setJobOutputPath(fallbackOutputPath);
-          setWorkflowStatus("Video job queued in backend render pipeline");
-          return;
-        }
-      }
-
-      setWorkflowStatus("Video workflow command failed (backend reachable, but job queue command returned no result)");
-      setStatus("Video workflow command failed");
-      toast.error("Video backend command failed. Check app logs and FFmpeg setup.");
-      setWorkflowBusy(false);
-    } catch (error) {
-      console.error("Video workflow failed", error);
-      setWorkflowStatus("Video workflow failed");
-      setStatus("Video workflow error");
-      setWorkflowBusy(false);
-      toast.error("Failed to run video workflow");
-    }
-  }, [activeLayersPayload, animationTemporal, backendConnected, buildAnimationTracksPayload, canRenderVideo, videoMetadata?.estimated_frame_count, videoRenderBlockedReason, videoSource]);
-
-  const handleExportAnimationFramesPack = useCallback(async () => {
-    if (!animationFrames.length || !animationFrameSize) {
-      toast.error("Render animation frames first");
-      return;
-    }
-
-    const exported = await safeTauriInvoke<ExportVideoFramesResponse>("export_video_frames", {
-      request: {
-        name: "animation-preview",
-        width: animationFrameSize.width,
-        height: animationFrameSize.height,
-        frames: animationFrames,
-      },
-    });
-
-    if (!exported) {
-      toast.error("Frame-pack export is unavailable in this runtime");
-      return;
-    }
-
-    const savedPath = await saveExportedBytes(exported.file_name, exported.bytes);
-    if (savedPath) {
-      setJobOutputPath(savedPath);
-      setWorkflowStatus(`Saved frame pack: ${savedPath}`);
-      toast.success(`Saved ${savedPath}`);
-    } else {
-      toast.success(`Exported ${exported.file_name}`);
-    }
-  }, [animationFrameSize, animationFrames]);
-
-  const handleAddFrameClone = useCallback(async () => {
-    if (!animationEditorFrames.length) {
-      toast.error("Load an image first");
-      return;
-    }
-
-    const current = animationEditorFrames[selectedEditorFrameIndex] ?? animationEditorFrames[0];
-    if (!current) {
-      return;
-    }
-
-    const clone: AnimationEditorFrame = {
-      id: makeFrameId(),
-      src: `${current.src}`,
-      width: current.width,
-      height: current.height,
-    };
-
-    setAnimationEditorFrames((prev) => {
-      const next = [...prev];
-      const insertAt = Math.min(selectedEditorFrameIndex + 1, prev.length);
-      next.splice(insertAt, 0, clone);
-      return next;
-    });
-    setSelectedEditorFrameIndex((prev) => prev + 1);
-    setStatus("Frame copied");
-    toast.success("Frame duplicated");
-  }, [animationEditorFrames, selectedEditorFrameIndex]);
-
-  const handleDeleteSelectedFrame = useCallback(() => {
-    if (animationEditorFrames.length <= 1) {
-      toast.error("Cannot delete the last frame");
-      return;
-    }
-
-    const removeIndex = selectedEditorFrameIndex;
-
-    setAnimationEditorFrames((prev) => {
-      const next = prev.filter((_, index) => index !== removeIndex);
-      setSelectedEditorFrameIndex((current) => {
-        if (current > removeIndex) {
-          return current - 1;
-        }
-        return Math.min(current, next.length - 1);
-      });
-      return next;
-    });
-
-    setEditorPreviewPlaying(false);
-    setAnimationPlaying(false);
-    setStatus("Frame deleted");
-    toast.success("Frame removed");
-  }, [animationEditorFrames.length, selectedEditorFrameIndex]);
-
-  const handleSelectEditorFrame = useCallback((index: number) => {
-    setSelectedEditorFrameIndex(index);
-    setEditorPreviewPlaying(false);
-    setAnimationPlaying(false);
-    setShowOriginal(true);
-  }, []);
-
-  const handleToggleAnimationPlayback = useCallback(() => {
-    if (workspaceMode !== "animation") {
-      return;
-    }
-
-    if (animationFrames.length > 1 && !showOriginal) {
-      setAnimationPlaying((prev) => !prev);
-      setEditorPreviewPlaying(false);
-      return;
-    }
-
-    if (animationEditorFrames.length > 1) {
-      setShowOriginal(true);
-      setEditorPreviewPlaying((prev) => !prev);
-      setAnimationPlaying(false);
-      return;
-    }
-
-    toast.error("Add at least 2 frames to preview animation");
-  }, [animationEditorFrames.length, animationFrames.length, showOriginal, workspaceMode]);
-
-  const handleApplyEffectToSelectedFrame = useCallback(async () => {
-    const currentFrame = animationEditorFrames[selectedEditorFrameIndex];
-    if (!currentFrame) {
-      toast.error("Select a frame first");
-      return;
-    }
-
-    setStatus(`Applying ${algorithm} to frame...`);
-    setWorkflowStatus(`Applying inspector recipe to frame ${selectedEditorFrameIndex + 1}`);
-
-    try {
-      const sourceImage = await loadImageFromSrc(currentFrame.src);
-      const canvas = document.createElement("canvas");
-      canvas.width = sourceImage.width;
-      canvas.height = sourceImage.height;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
-        throw new Error("Failed to create canvas context for frame apply");
-      }
-
-      ctx.drawImage(sourceImage, 0, 0);
-      // transferred to the worker — zero-copy
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
-      const { buffer, width, height } = await processImage(
-        imageData,
-        activeLayersPayload,
-        pixelSize,
-      );
-
-      const resultData = new ImageData(new Uint8ClampedArray(buffer), width, height);
-      canvas.width = width;
-      canvas.height = height;
-      ctx.putImageData(resultData, 0, 0);
-
-      const processed = processedImage ?? await loadImageFromSrc(canvas.toDataURL("image/png"));
-      const nextSrc = processed.src;
-
-      setAnimationEditorFrames((prev) =>
-        prev.map((frame, index) =>
-          index === selectedEditorFrameIndex
-            ? {
-                ...frame,
-                src: nextSrc,
-                width: processed.width,
-                height: processed.height,
-              }
-            : frame,
-        ),
-      );
-      setOriginalImage(processed);
-      setProcessedImage(processed);
-      setShowOriginal(false);
-      setImageSize(`${processed.width}×${processed.height}`);
-      setStatus("Frame updated");
-      toast.success(`Applied current recipe to frame ${selectedEditorFrameIndex + 1}`);
-    } catch (error) {
-      console.error("Failed to apply changes to selected frame", error);
-      setStatus("Effect apply error");
-      toast.error("Failed to apply effect to selected frame");
-    }
-  }, [activeLayersPayload, algorithm, animationEditorFrames, pixelSize, processedImage, selectedEditorFrameIndex]);
-
-  const handleRenderEditorFrames = useCallback(async () => {
-    if (!animationEditorFrames.length) {
-      toast.error("No frames to render");
-      return;
-    }
-
-    setStatus("Preparing frame export...");
-    try {
-      const frameImages = await Promise.all(animationEditorFrames.map((frame) => loadImageFromSrc(frame.src)));
-      const rgbaFrames = await Promise.all(frameImages.map((image) => imageToRgbaFrame(image)));
-      const width = rgbaFrames[0]?.width ?? 0;
-      const height = rgbaFrames[0]?.height ?? 0;
-      const exported = await safeTauriInvoke<ExportVideoFramesResponse>("export_video_frames", {
-        request: {
-          name: "animation-editor-frames",
-          width,
-          height,
-          frames: rgbaFrames.map((item) => Array.from(item.rgba)),
-          format: "gif",
-          fps: Math.max(1, animationPreviewFps * animationPreviewSpeed),
-        },
-      });
-
-      if (!exported) {
-        toast.error("Frame render/export is unavailable in this runtime");
-        setStatus("Render unavailable");
-        return;
-      }
-
-      const savedPath = await saveExportedBytes(exported.file_name, exported.bytes, "image/gif");
-      if (savedPath) {
-        setJobOutputPath(savedPath);
-        setWorkflowStatus(`Animation GIF saved: ${savedPath}`);
-      }
-      setStatus(`Rendered GIF with ${animationEditorFrames.length} frames`);
-      toast.success(savedPath ? `Saved ${savedPath}` : `Exported ${exported.file_name}`);
-    } catch (error) {
-      console.error("Failed to render animation editor frames", error);
-      setStatus("Render failed");
-      toast.error("Failed to render frame sequence");
-    }
-  }, [animationEditorFrames, animationPreviewFps, animationPreviewSpeed]);
-
-  const handleQueueAnimationFileRender = useCallback(async () => {
-    if (!originalImage) {
-      toast.error("Load an image first to render animation");
-      return;
-    }
-
-    const nativePath = getNativeFilePath(sourceImageFile);
-
-    setWorkflowBusy(true);
-    setJobKind("animation");
-    setJobProgress(null);
-    setStatus("Queueing animation file render...");
-
-    try {
-      const frame = await imageToRgbaFrame(originalImage);
-      const outputExtension = animationRenderMode === "quick" ? "gif" : "mp4";
-      const outputPath = nativePath
-        ? buildSiblingOutputPath(nativePath, "animated", outputExtension)
-        : await safeTauriInvoke<string>("get_default_output_path", {
-            fileName: `dither-yuki-animated-${Date.now()}.${outputExtension}`,
-          });
-
-      if (!outputPath) {
-        toast.error("Unable to resolve output path for animation render");
-        setWorkflowStatus("Animation render output path unavailable");
-        setWorkflowBusy(false);
-        return;
-      }
-
-      const queuedJobId = await safeTauriInvoke<string>("process_still_animation_file", {
-        request: {
-          output_path: outputPath,
-          width: frame.width,
-          height: frame.height,
-          frame: Array.from(frame.rgba),
-          frame_count: Math.max(animationTrack.endFrame + 1, 2),
-          layers: activeLayersPayload,
-          temporal: {
-            enabled: animationTemporal.enabled,
-            mode: animationTemporal.mode,
-            amount: animationTemporal.amount,
-            speed: animationTemporal.speed,
-            phase: animationTemporal.phase,
-          },
-          tracks: buildAnimationTracksPayload(Math.max(animationTrack.endFrame + 1, 2)),
-          mode: animationRenderMode,
-          quick_stride: animationQuickStride,
-        },
-      });
-
-      if (!queuedJobId) {
-        setWorkflowStatus("Animation file render is unavailable in this runtime");
-        toast.error("Animation file render backend is not available");
-        return;
-      }
-
-      setJobId(queuedJobId);
-      setJobOutputPath(outputPath);
-      setWorkflowStatus("Animation file render queued");
-    } catch (error) {
-      console.error("Animation file render failed", error);
-      setWorkflowStatus("Animation file render failed");
-      setStatus("Animation file render error");
-      setWorkflowBusy(false);
-      toast.error("Failed to queue animation file render");
-    }
-  }, [activeLayersPayload, animationQuickStride, animationRenderMode, animationTemporal, animationTrack.endFrame, buildAnimationTracksPayload, originalImage, sourceImageFile]);
-
-  const handleRunAnimationWorkflow = useCallback(async () => {
-    if (!originalImage) {
-      toast.error("Load an image first to render animation");
-      return;
-    }
-
-    setWorkflowBusy(true);
-    setAnimationPlaying(false);
-    setJobKind("animation");
-    setJobProgress(null);
-    setStatus("Rendering still animation...");
-    setWorkflowStatus("Preparing animation request...");
-
-    try {
-      const frame = await imageToRgbaFrame(originalImage);
-      const requestedFrameCount = Math.max(animationTrack.endFrame + 1, 2);
-
-      const backendResult = await safeTauriInvoke<RenderStillAnimationResponse>("render_still_animation", {
-        request: {
-          width: frame.width,
-          height: frame.height,
-          frame: Array.from(frame.rgba),
-          frame_count: requestedFrameCount,
-          layers: activeLayersPayload,
-          temporal: {
-            enabled: animationTemporal.enabled,
-            mode: animationTemporal.mode,
-            amount: animationTemporal.amount,
-            speed: animationTemporal.speed,
-            phase: animationTemporal.phase,
-          },
-          tracks: buildAnimationTracksPayload(requestedFrameCount),
-          mode: animationRenderMode,
-          quick_stride: animationQuickStride,
-        },
-      });
-
-      if (!backendResult) {
-        setWorkflowStatus("Backend unavailable: animation render is disabled in this runtime");
-        setStatus("Animation workflow fallback mode");
-        toast.error("Animation backend is not available in this runtime");
-        return;
-      }
-
-      setAnimationFrames(backendResult.processed_frames);
-      setAnimationFrameIndices(backendResult.rendered_frame_indices);
-      setAnimationFrameSize({ width: backendResult.width, height: backendResult.height });
-      setSelectedAnimationFrame(0);
-      setShowOriginal(false);
-
-      setWorkflowStatus(`Animation workflow complete: ${backendResult.frame_count} rendered frames`);
-      setStatus("Animation workflow complete");
-      toast.success(`Rendered ${backendResult.frame_count} animation frames`);
-    } catch (error) {
-      console.error("Animation workflow failed", error);
-      setWorkflowStatus("Animation workflow failed");
-      setStatus("Animation workflow error");
-      toast.error("Failed to run animation workflow");
-    } finally {
-      setWorkflowBusy(false);
-    }
-  }, [activeLayersPayload, animationQuickStride, animationRenderMode, animationTemporal, animationTrack.endFrame, buildAnimationTracksPayload, originalImage]);
-
   useEffect(() => {
     if (workspaceMode === "video" || workspaceMode === "animation") {
       setLeftPanelVisible(true);
     }
   }, [workspaceMode]);
+
+  useEffect(() => {
+    if (workspaceMode !== "animation") return;
+    commitControlsToActiveEffect();
+  }, [commitControlsToActiveEffect, workspaceMode]);
 
   useEffect(() => {
     if (workspaceMode !== "video") {
@@ -1774,7 +1540,7 @@ const Index = () => {
           setWorkflowBusy(false);
           setWorkflowStatus("Lost backend progress channel. Check Tauri process/logs and retry render.");
           setStatus("Backend progress unavailable");
-          toast.error("Не удалось получить прогресс рендера (backend недоступен)");
+          toast.error("Lost render progress channel (backend unavailable)");
           setJobId(null);
         }
         return;
@@ -1813,182 +1579,75 @@ const Index = () => {
     return () => window.clearInterval(timer);
   }, [jobId, jobKind]);
 
+  // ── Auto-populate filmstrip when image is loaded in animation mode ───────
   useEffect(() => {
-    if (!animationFrames.length || !animationFrameSize) {
-      return;
-    }
+    if (workspaceMode !== "animation") return;
+    if (!originalImage) return;
+    if (frames.length > 0) return; // already has frames
 
-    const currentFrame = animationFrames[selectedAnimationFrame];
-    if (!currentFrame) {
-      return;
-    }
+    const src = imageToDataUrl(originalImage);
+    if (!src) return;
+    const snapshotLayers = commitControlsToActiveEffect() ?? cloneLayers(layersRef.current);
+    const initialFrame = makeAnimationFrame({
+      id: makeFrameId(),
+      src,
+      width: originalImage.width,
+      height: originalImage.height,
+      layers: snapshotLayers,
+      activeLayerId: activeLayerIdRef.current,
+      isKeyframe: true,
+    });
+    setFrames([initialFrame]);
+    setSelectedFrameIndex(0);
+    setSelectedFrameIds(new Set([initialFrame.id]));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [commitControlsToActiveEffect, workspaceMode, originalImage]);
 
-    void rgbaToImage(currentFrame, animationFrameSize.width, animationFrameSize.height)
-      .then((image) => {
-        setProcessedImage(image);
-      })
-      .catch((error) => {
-        console.error("Failed to convert animation frame", error);
-      });
-  }, [animationFrameSize, animationFrames, selectedAnimationFrame]);
-
+  // ── Load selected frame + its layer snapshot into the preview ────────────
   useEffect(() => {
-    if (!animationPlaying || animationFrames.length <= 1) {
-      return;
-    }
+    if (workspaceMode !== "animation") return;
+    const frame = framesRef.current[selectedFrameIndex];
+    if (!frame) return;
 
-    const timer = window.setInterval(() => {
-      setSelectedAnimationFrame((prev) => (prev + 1) % animationFrames.length);
-    }, playbackIntervalMs);
-
-    return () => window.clearInterval(timer);
-  }, [animationFrames.length, animationPlaying, playbackIntervalMs]);
-
-  useEffect(() => {
-    if (workspaceMode !== "animation") {
-      return;
-    }
-
-    if (!animationEditorFrames.length && originalImage) {
-      const src = imageToDataUrl(originalImage);
-      if (src) {
-        setAnimationEditorFrames([
-          {
-            id: makeFrameId(),
-            src,
-            width: originalImage.width,
-            height: originalImage.height,
-          },
-        ]);
-        setSelectedEditorFrameIndex(0);
-      }
-    }
-  }, [animationEditorFrames.length, originalImage, workspaceMode]);
-
-  useEffect(() => {
-    if (workspaceMode !== "animation") {
-      return;
-    }
-
-    const frame = animationEditorFrames[selectedEditorFrameIndex];
-    if (!frame) {
-      return;
-    }
+    setLayers(cloneLayers(frame.layers));
+    setActiveLayerId(frame.activeLayerId ?? frame.layers[0]?.id ?? "");
+    const snapshotLayer = frame.layers.find((layer) => layer.id === (frame.activeLayerId ?? frame.layers[0]?.id)) ?? frame.layers[0] ?? null;
+    applyLayerSnapshotToControls(snapshotLayer);
 
     void loadImageFromSrc(frame.src)
       .then((image) => {
         setOriginalImage(image);
-        setProcessedImage(null);
-        setShowOriginal(true);
         setImageSize(`${image.width}×${image.height}`);
+        if (frame.previewDataUrl) {
+          void loadImageFromSrc(frame.previewDataUrl)
+            .then((preview) => {
+              setProcessedImage(preview);
+            })
+            .catch((error) => {
+              console.error("Failed to load cached frame preview", error);
+              void renderFramePreview(frame.id, frame.layers, image);
+            });
+        } else {
+          void renderFramePreview(frame.id, frame.layers, image);
+        }
       })
       .catch((error) => {
-        console.error("Failed to load selected animation editor frame", error);
+        console.error("Failed to load selected animation frame", error);
       });
-  }, [animationEditorFrames, selectedEditorFrameIndex, workspaceMode]);
+  }, [applyLayerSnapshotToControls, renderFramePreview, selectedFrameIndex, workspaceMode]);
 
+  // ── Unified play loop — cycles selectedFrameIndex at animationPreviewFps ──
   useEffect(() => {
-    if (workspaceMode !== "animation" || !editorPreviewPlaying || animationEditorFrames.length <= 1) {
-      return;
-    }
+    if (!isPlaying || frames.length <= 1) return;
 
     const timer = window.setInterval(() => {
-      setSelectedEditorFrameIndex((prev) => (prev + 1) % animationEditorFrames.length);
+      setSelectedFrameIndex((prev) => (prev + 1) % frames.length);
     }, playbackIntervalMs);
 
     return () => window.clearInterval(timer);
-  }, [animationEditorFrames.length, editorPreviewPlaying, playbackIntervalMs, workspaceMode]);
+  }, [frames.length, isPlaying, playbackIntervalMs]);
 
-  const handleApplyFilter = useCallback(async () => {
-    if (!originalImage) {
-      toast.error("Please load an image first!");
-      return;
-    }
-
-    setStatus("Processing...");
-    setPreviewProcessing(true);
-
-    try {
-      const canvas = document.createElement('canvas');
-      // Downscale preview canvas to MAX_PREVIEW_PX so we never send a 4K
-      // image (8 MB+ of RGBA) over IPC on every slider tick.
-      const previewScale = Math.min(1, MAX_PREVIEW_PX / Math.max(originalImage.width, originalImage.height));
-      canvas.width = Math.round(originalImage.width * previewScale);
-      canvas.height = Math.round(originalImage.height * previewScale);
-      const ctx = canvas.getContext('2d');
-
-      if (!ctx) {
-        toast.error("Failed to create canvas context");
-        return;
-      }
-
-      ctx.drawImage(originalImage, 0, 0, canvas.width, canvas.height);
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
-      // Process image via Rust backend — same engine used for final render
-      const { buffer, width, height } = await processImage(
-        imageData,
-        activeLayersPayload,
-        deferredPixelSize,
-      );
-
-      const resultData = new ImageData(new Uint8ClampedArray(buffer), width, height);
-      canvas.width = width;
-      canvas.height = height;
-      ctx.putImageData(resultData, 0, 0);
-
-      const processedImg = new Image();
-      processedImg.onload = () => {
-        setProcessedImage(processedImg);
-        setShowOriginal(false);
-        setStatus("Ready");
-      };
-      processedImg.src = canvas.toDataURL();
-    } catch (error) {
-      console.error("Error applying filter:", error);
-      toast.error("Failed to apply filter");
-      setStatus("Error");
-    } finally {
-      setPreviewProcessing(false);
-    }
-  }, [activeLayersPayload, deferredPixelSize, originalImage, processImage]);
-
-  // Auto-apply filter when any parameter changes (debounced to avoid firing
-  // a backend call on every individual slider tick during a drag).
-  useEffect(() => {
-    if (!originalImage || workspaceMode !== "image") return;
-    if (previewDebounceTimerRef.current) clearTimeout(previewDebounceTimerRef.current);
-    previewDebounceTimerRef.current = setTimeout(() => { handleApplyFilter(); }, 180);
-    return () => {
-      if (previewDebounceTimerRef.current) clearTimeout(previewDebounceTimerRef.current);
-    };
-  }, [handleApplyFilter, originalImage, workspaceMode]);
-
-  useEffect(() => {
-    if (!originalImage || workspaceMode !== "video" || videoPreviewBusy) {
-      return;
-    }
-    if (previewDebounceTimerRef.current) clearTimeout(previewDebounceTimerRef.current);
-    previewDebounceTimerRef.current = setTimeout(() => {
-      void renderInspectorPreview(originalImage, true);
-    }, 180);
-    return () => {
-      if (previewDebounceTimerRef.current) clearTimeout(previewDebounceTimerRef.current);
-    };
-  }, [activeLayersPayload, originalImage, renderInspectorPreview, videoPreviewBusy, workspaceMode]);
-
-  useEffect(() => {
-    if (!originalImage || workspaceMode !== "animation") {
-      return;
-    }
-    if (previewDebounceTimerRef.current) clearTimeout(previewDebounceTimerRef.current);
-    previewDebounceTimerRef.current = setTimeout(() => {
-      void renderInspectorPreview(originalImage, true);
-    }, 180);
-    return () => {
-      if (previewDebounceTimerRef.current) clearTimeout(previewDebounceTimerRef.current);
-    };
-  }, [activeLayersPayload, originalImage, renderInspectorPreview, workspaceMode]);
+  
 
   const handleReset = useCallback(() => {
     setProcessedImage(null);
@@ -2004,18 +1663,17 @@ const Index = () => {
     setStatus("Ready");
   }, []);
 
-  const handleSave = useCallback(() => {
+  // Save current processed image as PNG (was the old "Save")
+  const handleExportImage = useCallback(() => {
     const imageToSave = processedImage || originalImage;
     if (!imageToSave) {
-      toast.error("No image to save!");
+      toast.error("No image to export!");
       return;
     }
-
     const canvas = document.createElement('canvas');
     canvas.width = imageToSave.width;
     canvas.height = imageToSave.height;
     const ctx = canvas.getContext('2d');
-    
     if (ctx) {
       ctx.drawImage(imageToSave, 0, 0);
       canvas.toBlob((blob) => {
@@ -2031,9 +1689,197 @@ const Index = () => {
     }
   }, [originalImage, processedImage]);
 
+  // Save / Open project (.dyproj) ─────────────────────────────────────────
+  const newProject = useProjectStore((s) => s.newProject);
+  const loadProject = useProjectStore((s) => s.loadProject);
+  const updateManifest = useProjectStore((s) => s.updateManifest);
+  const projectManifest = useProjectStore((s) => s.manifest);
+
+  const handleSaveProject = useCallback(async () => {
+    try {
+      const committedLayers = commitControlsToActiveEffect() ?? cloneLayers(layersRef.current);
+      const framesForSave = framesRef.current.map((frame, index) => (
+        index === selectedFrameIndex
+          ? {
+              ...frame,
+              layers: cloneLayers(committedLayers),
+              activeLayerId: activeLayerIdRef.current,
+              isKeyframe: true,
+            }
+          : frame
+      ));
+      const timelineData = encodeFilmstripProjectData({
+        version: 1,
+        frames: framesForSave,
+        selectedFrameIndex,
+        selectedFrameIds: Array.from(selectedFrameIds),
+      });
+
+      // Ensure a manifest exists — create one if this is the first save.
+      if (!projectManifest) {
+        const name = originalImage
+          ? (sourceImageFile?.name.replace(/\.[^.]+$/, "") ?? "Untitled Project")
+          : "Untitled Project";
+        newProject(name);
+      }
+
+      // Persist currently loaded source image as a manifest asset (for project reopen).
+      // Works both for real files (native path exists) and in-memory images (canvas fallback).
+      if (originalImage) {
+        const nativeImagePath = getNativeFilePath(sourceImageFile);
+        let stagedPath: string | null = nativeImagePath;
+        let storageMode: "external" | "embedded" = nativeImagePath ? "external" : "embedded";
+        let imageBytes: number[] | null = null;
+        const imageName = sourceImageFile?.name ?? "source-image.png";
+
+        if (!stagedPath) {
+          if (sourceImageFile) {
+            imageBytes = Array.from(new Uint8Array(await sourceImageFile.arrayBuffer()));
+          } else {
+            const canvas = document.createElement("canvas");
+            canvas.width = originalImage.naturalWidth || originalImage.width;
+            canvas.height = originalImage.naturalHeight || originalImage.height;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) {
+              throw new Error("Failed to create canvas context for source image staging");
+            }
+            ctx.drawImage(originalImage, 0, 0, canvas.width, canvas.height);
+            const blob = await new Promise<Blob | null>((resolve) => {
+              canvas.toBlob(resolve, "image/png");
+            });
+            if (!blob) {
+              throw new Error("Failed to encode source image for project save");
+            }
+            imageBytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
+          }
+
+          const extension = imageName.split(".").pop()?.toLowerCase() || "png";
+          const tmpPath = `/tmp/dither-yuki/staging/source-${crypto.randomUUID()}.${extension}`;
+          const writePath = await safeTauriInvoke<string>("save_bytes_to_path", {
+            filePath: tmpPath,
+            bytes: imageBytes,
+          });
+          if (!writePath) {
+            throw new Error("Failed to stage source image for project save");
+          }
+          stagedPath = writePath;
+          storageMode = "embedded";
+        }
+
+        updateManifest((m) => {
+          const existingImageAsset = m.assets.find((a) => a.assetType === "image");
+          const imageAssetId = existingImageAsset?.id ?? `image-${crypto.randomUUID()}`;
+          const imageSize = sourceImageFile?.size ?? imageBytes?.length ?? existingImageAsset?.sizeBytes ?? 0;
+          const filtered = m.assets.filter((a) => a.id !== imageAssetId && a.assetType !== "image");
+
+          return {
+            ...m,
+            assets: [
+              {
+                id: imageAssetId,
+                name: imageName || existingImageAsset?.name || "source-image.png",
+                assetType: "image",
+                storage: storageMode,
+                originalPath: stagedPath,
+                hash: null,
+                sizeBytes: imageSize,
+                offline: false,
+              },
+              ...filtered,
+            ],
+          };
+        });
+      }
+
+      // Re-read filePath from store after potential newProject() call.
+      const existingPath = useProjectStore.getState().filePath;
+      const path = existingPath ?? await pickSaveProjectPath(
+        projectManifest?.name
+          ? `${projectManifest.name}.dyproj`
+          : `${sourceImageFile?.name.replace(/\.[^.]+$/, "") ?? "project"}.dyproj`,
+      );
+      if (!path) {
+        // User cancelled the dialog
+        return;
+      }
+      const normalizedPath = path.toLowerCase().endsWith(".dyproj") ? path : `${path}.dyproj`;
+      const saveResult = await useProjectStore.getState().saveProject(normalizedPath, timelineData);
+      if (saveResult === null) {
+        throw new Error("save_project returned empty result");
+      }
+      toast.success(`Project saved: ${normalizedPath.split("/").pop()}`);
+      setStatus("Project saved");
+    } catch (err) {
+      console.error("Save project failed", err);
+      toast.error(`Failed to save project: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [activeLayerIdRef, commitControlsToActiveEffect, framesRef, layersRef, newProject, originalImage, projectManifest, selectedFrameIds, selectedFrameIndex, sourceImageFile, updateManifest]);
+
+  const handleOpenProject = useCallback(async () => {
+    try {
+      const path = await pickOpenProjectPath();
+      if (!path) return;
+      const result = await loadProject(path);
+      toast.success(`Project opened: ${path.split("/").pop()}`);
+      if (result.offlineAssets.length) {
+        toast.warning(`${result.offlineAssets.length} asset(s) could not be relinked`);
+      }
+
+      const loadedManifest = useProjectStore.getState().manifest;
+      const imageAsset = loadedManifest?.assets.find((a) => a.assetType === "image" && !a.offline)
+        ?? loadedManifest?.assets.find((a) => !a.offline && /\.(png|jpe?g|gif|webp|bmp)$/i.test(a.name));
+      const filmstrip = decodeFilmstripProjectData(result.timelineData);
+      if (imageAsset) {
+        let assetSrc = `dyproj://localhost/asset/${encodeURIComponent(imageAsset.id)}`;
+        if (imageAsset.originalPath) {
+          try {
+            const { convertFileSrc } = await import("@tauri-apps/api/core");
+            assetSrc = convertFileSrc(imageAsset.originalPath);
+          } catch {
+            // Keep dyproj fallback URL.
+          }
+        }
+        try {
+          const restored = await loadImageFromSrc(assetSrc);
+          setOriginalImage(restored);
+          setProcessedImage(null);
+          setShowOriginal(true);
+          setImageSize(`${restored.width}×${restored.height}`);
+          if (filmstrip?.frames.length) {
+            setFrames(filmstrip.frames);
+            setSelectedFrameIndex(filmstrip.selectedFrameIndex);
+            setSelectedFrameIds(new Set(filmstrip.selectedFrameIds.length ? filmstrip.selectedFrameIds : [filmstrip.frames[filmstrip.selectedFrameIndex]?.id ?? filmstrip.frames[0]?.id].filter(Boolean) as string[]));
+            setWorkspaceMode("animation");
+            setStatus("Project loaded with filmstrip");
+          } else {
+            setWorkspaceMode("image");
+            setStatus("Project loaded");
+          }
+        } catch (imageErr) {
+          console.error("Project opened, but image restore failed", imageErr);
+          toast.warning("Project opened, but source image could not be restored");
+          setStatus("Project loaded (image unavailable)");
+        }
+      } else {
+        if (filmstrip?.frames.length) {
+          setFrames(filmstrip.frames);
+          setSelectedFrameIndex(filmstrip.selectedFrameIndex);
+          setSelectedFrameIds(new Set(filmstrip.selectedFrameIds.length ? filmstrip.selectedFrameIds : [filmstrip.frames[filmstrip.selectedFrameIndex]?.id ?? filmstrip.frames[0]?.id].filter(Boolean) as string[]));
+          setWorkspaceMode("animation");
+          setStatus("Project loaded with filmstrip");
+        } else {
+          setStatus("Project loaded (no source image asset)");
+        }
+      }
+    } catch (err) {
+      console.error("Open project failed", err);
+      toast.error("Failed to open project");
+    }
+  }, [loadProject]);
+
   const handleExport = useCallback(() => {
-    handleSave();
-  }, [handleSave]);
+    handleExportImage();
+  }, [handleExportImage]);
 
   const handleExtractPaletteFromCurrentImage = useCallback(async (): Promise<string[] | null> => {
     const imageSource = processedImage || originalImage;
@@ -2159,10 +2005,7 @@ const Index = () => {
   };
 
   const handleExportPatternPreset = useCallback(async () => {
-    const presetName = window.prompt("Preset name", `${algorithm} preset`)?.trim();
-    if (!presetName) {
-      return;
-    }
+    const presetName = `${algorithm} preset`;
 
     const isShareable = shareablePatternAlgorithms.length === 0 || shareablePatternAlgorithms.includes(algorithm);
     if (!isShareable) {
@@ -2352,12 +2195,32 @@ const Index = () => {
       const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
       if (tag === 'input' || tag === 'textarea' || (e.target as HTMLElement)?.isContentEditable) return;
 
-      if (mod && (e.key === 'o' || e.key === 'O')) {
+      // Undo / Redo
+      if (mod && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+        e.preventDefault();
+        handleUndo();
+      } else if (mod && e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+        e.preventDefault();
+        handleRedo();
+      } else if (mod && (e.key === 'y' || e.key === 'Y')) {
+        e.preventDefault();
+        handleRedo();
+      // Open image
+      } else if (mod && !e.shiftKey && (e.key === 'o' || e.key === 'O')) {
         e.preventDefault();
         handleOpenFile();
-      } else if (mod && (e.key === 's' || e.key === 'S')) {
+      // Open project
+      } else if (mod && e.shiftKey && (e.key === 'o' || e.key === 'O')) {
         e.preventDefault();
-        handleSave();
+        void handleOpenProject();
+      // Save project
+      } else if (mod && !e.shiftKey && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault();
+        void handleSaveProject();
+      // Export image (PNG)
+      } else if (mod && e.shiftKey && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault();
+        handleExportImage();
       } else if (mod && (e.key === 'e' || e.key === 'E')) {
         e.preventDefault();
         handleExport();
@@ -2381,7 +2244,14 @@ const Index = () => {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [handleDeleteSelectedFrame, handleExport, handleOpenFile, handleReset, handleSave, workspaceMode]);
+  }, [handleDeleteSelectedFrame, handleExport, handleExportImage, handleOpenFile, handleOpenProject, handleRedo, handleReset, handleSaveProject, handleUndo, workspaceMode]);
+
+  // Frames that are keyframes — shown with a blue dot in the filmstrip.
+  const keyframeIndices = useMemo(() => {
+    const s = new Set<number>();
+    frames.forEach((f, idx) => { if (f.isKeyframe) s.add(idx); });
+    return s;
+  }, [frames]);
 
   return (
     <div className="win98-desktop">
@@ -2409,15 +2279,19 @@ const Index = () => {
 
       <TooltipProvider delayDuration={120}>
       <div className="win98-shell">
-        <div className="flex-1 min-h-0 flex flex-col overflow-hidden win98-surface">
+        <div className="win98-surface">
 
         {!focusMode && (
           <MenuBar
             onOpenFile={handleOpenFile}
-            onSaveImage={handleSave}
+            onOpenProject={handleOpenProject}
+            onSaveImage={handleExportImage}
+            onSaveProject={handleSaveProject}
             onExport={handleExport}
             onExportSvg={handleExportSvg}
             onReset={handleReset}
+            onUndo={handleUndo}
+            onRedo={handleRedo}
             onShowAbout={() => setShowAbout(true)}
             onShowShortcuts={() => setShowShortcuts(true)}
             onSavePreset={() => setShowPresetManager(true)}
@@ -2439,385 +2313,229 @@ const Index = () => {
           leftPanelVisible={leftPanelVisible}
         />
 
-        <div className="flex-1 min-h-0 overflow-hidden p-0">
-          <div className={`${focusMode ? "grid grid-cols-1" : leftPanelVisible ? "win98-workspace-grid-3col" : "win98-workspace-grid-2col"} h-full`}>
+        <div className="flex-1 min-h-0 overflow-hidden p-2">
+          <div className={`grid h-full min-h-0 gap-2 ${focusMode ? "grid-cols-1" : leftPanelVisible ? "grid-cols-[240px_minmax(0,1fr)_280px]" : "grid-cols-[minmax(0,1fr)_280px]"}`}>
             {!focusMode && leftPanelVisible && (
-              <div className="h-full min-h-0 flex flex-col gap-2 overflow-y-auto overflow-x-hidden win98-scroll">
-                <div className="win98-card">
-                  <div className="react95-window-header">
-                    <span>Workspace</span>
-                    <span className="text-[10px] font-normal">Pinned left dock</span>
-                  </div>
-                  <div className="win95-button rounded-none px-2 py-1 text-[11px] font-bold inline-flex items-center gap-2">
-                    <Dock className="h-4 w-4" />
-                    <span>Pipeline</span>
-                  </div>
-                </div>
-
-                <PipelinePanel
-                  mode={workspaceMode}
-                  layers={displayPipelineStack}
-                  isProcessing={previewProcessing}
-                  algorithmOptions={algorithmOptions}
-                  paletteOptions={paletteOptions}
-                  onReorder={handlePipelineReorder}
-                  onToggleVisible={handlePipelineToggleVisible}
-                  onRemove={handlePipelineRemoveLayer}
-                  onAddLayer={handlePipelineAddLayer}
-                />
-              </div>
+              <LayersWindow
+                layers={layers}
+                activeLayerId={activeLayerId}
+                onSelectLayer={handleSelectLayer}
+                onAddLayer={handleAddLayer}
+                onRemoveLayer={handleRemoveLayer}
+                onToggleVisibility={handleToggleLayerVisibility}
+                onToggleLock={handleToggleLayerLock}
+                onMoveLayer={handleMoveLayer}
+              />
             )}
 
-            <div className="h-full min-h-0 flex flex-col overflow-hidden gap-2">
-              <PreviewPanel
-                originalImage={originalImage}
-                processedImage={processedImage}
-                showOriginal={showOriginal}
-                setShowOriginal={setShowOriginal}
-                isAnimationMode={workspaceMode === "animation"}
-                canAnimate={animationEditorFrames.length > 1 || animationFrames.length > 1}
-                animationPlaying={editorPreviewPlaying || animationPlaying}
-                onToggleAnimationPlayback={handleToggleAnimationPlayback}
-                animationFps={animationPreviewFps}
-                onAnimationFpsChange={setAnimationPreviewFps}
-                animationSpeed={animationPreviewSpeed}
-                onAnimationSpeedChange={setAnimationPreviewSpeed}
-              />
-              {!focusMode && (
-                workspaceMode === "video" ? (
-                  <div className="win98-card flex flex-col gap-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="win98-badge font-mono text-[11px]">{videoPreviewFrames.length} samples</span>
-                      <button
-                        type="button"
-                        className="win95-button px-2 py-0.5 text-xs"
-                        onClick={handleRunVideoWorkflow}
-                        disabled={workflowBusy || !videoSource || !canRenderVideo}
-                        title={!canRenderVideo ? videoRenderBlockedReason : undefined}
-                      >
-                        {workflowBusy ? "Rendering..." : "Render Video"}
-                      </button>
-                      <span className="win95-border-inset px-2 py-0.5 text-[10px] text-muted-foreground">
-                        {videoPreviewBusy
-                          ? "Building preview timeline..."
-                          : videoMetadata
-                            ? `${videoMetadata.fps.toFixed(2)} FPS • ${videoMetadata.duration_seconds.toFixed(1)}s`
-                            : "Preview timeline"}
-                      </span>
-                    </div>
-                    {videoPreviewFrames.length > 0 ? (
-                      <div className="flex gap-1 overflow-x-auto win98-scroll pb-1">
-                        {videoPreviewFrames.map((frame, index) => (
-                          <button
-                            key={frame.id}
-                            type="button"
-                            onClick={() => setSelectedVideoPreviewFrame(index)}
-                            className={`relative flex-shrink-0 win95-border p-0.5 ${selectedVideoPreviewFrame === index ? "bg-primary/20 ring-2 ring-primary" : "bg-card"}`}
-                            title={`Frame sample ${index + 1} • ${frame.label}`}
-                          >
-                            <img src={frame.src} alt={`Video sample ${index + 1}`} className="h-10 w-14 object-cover" />
-                            <div className={`mt-0.5 px-1 text-[9px] font-bold leading-none ${selectedVideoPreviewFrame === index ? "text-primary" : "text-muted-foreground"}`}>
-                              {frame.label}
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="win95-border-inset px-2 py-2 text-[11px] text-muted-foreground">
-                        {videoPreviewBusy
-                          ? "Sampling video frames for preview..."
-                          : videoSource
-                            ? "No video preview frames yet"
-                            : "Open a video to populate the timeline strip"}
-                      </div>
-                    )}
-                  </div>
-                ) : workspaceMode === "animation" ? (
-                  <div className="win98-card flex flex-col gap-2">
-                    {animationEditorFrames.length > 0 && (
-                      <div className="flex gap-1 overflow-x-auto win98-scroll pb-1">
-                        {animationEditorFrames.map((frame, index) => (
-                          <button
-                            key={frame.id}
-                            type="button"
-                            onClick={() => handleSelectEditorFrame(index)}
-                            className={`relative flex-shrink-0 win95-border p-0.5 ${selectedEditorFrameIndex === index ? "bg-primary/20 ring-2 ring-primary" : "bg-card"}`}
-                            title={`Frame ${index + 1}${selectedEditorFrameIndex === index ? " (selected)" : ""}`}
-                          >
-                            <img src={frame.src} alt={`Frame ${index + 1}`} className="h-10 w-14 object-cover" />
-                            <div className={`mt-0.5 px-1 text-[9px] font-bold leading-none ${selectedEditorFrameIndex === index ? "text-primary" : "text-muted-foreground"}`}>
-                              #{index + 1}
-                            </div>
-                            {selectedEditorFrameIndex === index && (
-                              <span className="absolute right-0.5 top-0.5 bg-primary px-1 text-[8px] font-bold uppercase text-primary-foreground">
-                                Selected
-                              </span>
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    <AnimationTimelinePanel
-                      frameCount={Math.max(animationTrack.endFrame + 1, 2)}
-                      frameIndices={animationFrameIndices.length ? animationFrameIndices : animationEditorFrames.map((_, index) => index)}
-                      selectedFrameIndex={animationFrameIndices.length ? selectedAnimationFrame : selectedEditorFrameIndex}
-                      onSelectFrame={(index) => {
-                        if (animationFrameIndices.length) {
-                          setSelectedAnimationFrame(index);
-                          setShowOriginal(false);
-                          setAnimationPlaying(false);
-                        } else {
-                          handleSelectEditorFrame(index);
-                        }
-                      }}
-                      isPlaying={editorPreviewPlaying || animationPlaying}
-                      onTogglePlayback={handleToggleAnimationPlayback}
-                      renderMode={animationRenderMode}
-                      onRenderModeChange={setAnimationRenderMode}
-                      quickStride={animationQuickStride}
-                      onQuickStrideChange={setAnimationQuickStride}
-                      temporalModes={temporalModes}
-                      easingModes={easingModes}
-                      parameterModes={parameterModes}
-                      temporal={animationTemporal}
-                      onTemporalChange={setAnimationTemporal}
-                      track={animationTrack}
-                      onTrackChange={setAnimationTrack}
-                      workflowStatus={workflowStatus}
-                      onExportFramesPack={handleExportAnimationFramesPack}
-                      onAddFrame={handleAddFrameClone}
-                      onDeleteFrame={handleDeleteSelectedFrame}
-                      onApplyFrame={handleApplyEffectToSelectedFrame}
-                      onRenderGif={handleRenderEditorFrames}
-                      canDeleteFrame={workspaceMode === "animation" && animationEditorFrames.length > 1}
-                      canRunFrameActions={workspaceMode === "animation" && animationEditorFrames.length > 0}
-                      hasFrames={animationFrames.length > 0}
-                    />
-                  </div>
-                ) : (
-                    <></>
-                )
-              )}
-            </div>
+            <WorkspaceMain
+              focusMode={focusMode}
+              workspaceMode={workspaceMode}
+              originalImage={originalImage}
+              processedImage={processedImage}
+              showOriginal={showOriginal}
+              setShowOriginal={setShowOriginal}
+              frames={frames}
+              selectedFrameIndex={selectedFrameIndex}
+              selectedFrameIds={selectedFrameIds}
+              isPlaying={isPlaying}
+              workflowStatus={workflowStatus}
+              animationPreviewFps={animationPreviewFps}
+              setAnimationPreviewFps={setAnimationPreviewFps}
+              animationPreviewSpeed={animationPreviewSpeed}
+              setAnimationPreviewSpeed={setAnimationPreviewSpeed}
+              onFileDrop={handleFile}
+              onSelectFrame={handleSelectFrame}
+              onMultiSelectFrame={handleMultiSelectFrame}
+              onToggleAnimationPlayback={handleToggleAnimationPlayback}
+              onAddFrame={handleAddFrameClone}
+              onImportFrame={handleImportAnimationFrame}
+              onDeleteSelectedFrame={handleDeleteSelectedFrame}
+              onApplyEffectToSelectedFrame={handleApplyEffectToSelectedFrame}
+              onApplyToSelected={handleApplyToSelected}
+              onInterpolateSelected={handleInterpolateSelected}
+              onRenderAnimation={handleExportAnimation}
+              onToggleKeyframe={handleToggleKeyframe}
+              videoPreviewFrames={videoPreviewFrames}
+              selectedVideoPreviewFrame={selectedVideoPreviewFrame}
+              setSelectedVideoPreviewFrame={setSelectedVideoPreviewFrame}
+              workflowBusy={workflowBusy}
+              videoSource={videoSource}
+              canRenderVideo={canRenderVideo}
+              videoRenderBlockedReason={videoRenderBlockedReason}
+              videoPreviewBusy={videoPreviewBusy}
+              videoMetadata={videoMetadata}
+              onRunVideoWorkflow={handleRunVideoWorkflow}
+            />
 
             {!focusMode && (
-              <div className="h-full min-h-0 flex flex-col gap-2 overflow-y-auto overflow-x-hidden pr-1 win98-scroll">
-                <div className="win98-card">
-                  <div className="react95-window-header">
-                    <span>Inspector</span>
-                    <span className="text-[10px] font-normal">Pinned right panel</span>
-                  </div>
-                  <ControlPanel
-                    algorithm={algorithm}
-                    algorithmOptions={algorithmOptions}
-                    setAlgorithm={setAlgorithm as (value: string) => void}
-                    palette={palette}
-                    paletteOptions={paletteOptions}
-                    setPalette={setPalette as (value: string) => void}
-                    intensity={intensity}
-                    setIntensity={setIntensity}
-                    contrast={contrast}
-                    setContrast={setContrast}
-                    brightness={brightness}
-                    setBrightness={setBrightness}
-                    saturation={saturation}
-                    setSaturation={setSaturation}
-                    pixelSize={pixelSize}
-                    setPixelSize={setPixelSize}
-                    blur={blur}
-                    setBlur={setBlur}
-                    sharpness={sharpness}
-                    setSharpness={setSharpness}
-                    noise={noise}
-                    setNoise={setNoise}
-                    blendMode={blendMode}
-                    setBlendMode={setBlendMode}
-                    layerOpacity={layerOpacity}
-                    setLayerOpacity={setLayerOpacity}
-                    paletteSwatches={paletteSwatches}
-                    onPaletteReorder={handlePaletteReorder}
-                    onPaletteColorEdit={handlePaletteColorEdit}
-                    snapGlitchToPalette={snapGlitchToPalette}
-                    setSnapGlitchToPalette={setSnapGlitchToPalette}
-                    paletteMix={paletteMix}
-                    setPaletteMix={setPaletteMix}
-                    globalSeed={globalSeed}
-                    setGlobalSeed={setGlobalSeed}
-                    glitchType={glitchType}
-                    setGlitchType={setGlitchType}
-                    pixelSortMetric={pixelSortMetric}
-                    setPixelSortMetric={setPixelSortMetric}
-                    pixelSortMask={pixelSortMask}
-                    setPixelSortMask={setPixelSortMask}
-                    thresholdMin={thresholdMin}
-                    setThresholdMin={setThresholdMin}
-                    thresholdMax={thresholdMax}
-                    setThresholdMax={setThresholdMax}
-                    angle={angle}
-                    setAngle={setAngle}
-                    sortLength={sortLength}
-                    setSortLength={setSortLength}
-                    blockSize={blockSize}
-                    setBlockSize={setBlockSize}
-                    chaos={chaos}
-                    setChaos={setChaos}
-                    quantization={quantization}
-                    setQuantization={setQuantization}
-                    redShiftX={redShiftX}
-                    setRedShiftX={setRedShiftX}
-                    redShiftY={redShiftY}
-                    setRedShiftY={setRedShiftY}
-                    greenShiftX={greenShiftX}
-                    setGreenShiftX={setGreenShiftX}
-                    greenShiftY={greenShiftY}
-                    setGreenShiftY={setGreenShiftY}
-                    blueShiftX={blueShiftX}
-                    setBlueShiftX={setBlueShiftX}
-                    blueShiftY={blueShiftY}
-                    setBlueShiftY={setBlueShiftY}
-                    globalRgbShiftIntensity={globalRgbShiftIntensity}
-                    setGlobalRgbShiftIntensity={setGlobalRgbShiftIntensity}
-                    sliceCount={sliceCount}
-                    setSliceCount={setSliceCount}
-                    maxOffset={maxOffset}
-                    setMaxOffset={setMaxOffset}
-                    randomness={randomness}
-                    setRandomness={setRandomness}
-                    scanlineThickness={scanlineThickness}
-                    setScanlineThickness={setScanlineThickness}
-                    scanlineGap={scanlineGap}
-                    setScanlineGap={setScanlineGap}
-                    flicker={flicker}
-                    setFlicker={setFlicker}
-                    curvature={curvature}
-                    setCurvature={setCurvature}
-                  />
+              <aside className="min-h-0 overflow-hidden">
+                <div className="flex h-full min-h-0 flex-col gap-2 overflow-hidden">
+                  <InspectorWindow title="Inspector" subtitle="inspector">
+                    <ControlPanel
+                      algorithm={algorithm}
+                      algorithmOptions={algorithmOptions}
+                      setAlgorithm={(v: string) => setAlgorithm(v as DitheringAlgorithm)}
+                      palette={palette}
+                      paletteOptions={paletteOptions}
+                      setPalette={(v: string) => setPalette(v as ColorPalette)}
+                      intensity={intensity}
+                      setIntensity={setIntensity}
+                      contrast={contrast}
+                      setContrast={setContrast}
+                      brightness={brightness}
+                      setBrightness={setBrightness}
+                      saturation={saturation}
+                      setSaturation={setSaturation}
+                      pixelSize={pixelSize}
+                      setPixelSize={setPixelSize}
+                      blur={blur}
+                      setBlur={setBlur}
+                      sharpness={sharpness}
+                      setSharpness={setSharpness}
+                      noise={noise}
+                      setNoise={setNoise}
+                      blendMode={blendMode}
+                      setBlendMode={setBlendMode}
+                      layerOpacity={layerOpacity}
+                      setLayerOpacity={setLayerOpacity}
+                      paletteSwatches={paletteSwatches}
+                      onPaletteReorder={handlePaletteReorder}
+                      onPaletteColorEdit={handlePaletteColorEdit}
+                      snapGlitchToPalette={snapGlitchToPalette}
+                      setSnapGlitchToPalette={setSnapGlitchToPalette}
+                      paletteMix={paletteMix}
+                      setPaletteMix={setPaletteMix}
+                      globalSeed={globalSeed}
+                      setGlobalSeed={setGlobalSeed}
+                      glitchType={glitchType}
+                      setGlitchType={setGlitchType}
+                      pixelSortMetric={pixelSortMetric}
+                      setPixelSortMetric={setPixelSortMetric}
+                      pixelSortMask={pixelSortMask}
+                      setPixelSortMask={setPixelSortMask}
+                      thresholdMin={thresholdMin}
+                      setThresholdMin={setThresholdMin}
+                      thresholdMax={thresholdMax}
+                      setThresholdMax={setThresholdMax}
+                      angle={angle}
+                      setAngle={setAngle}
+                      sortLength={sortLength}
+                      setSortLength={setSortLength}
+                      blockSize={blockSize}
+                      setBlockSize={setBlockSize}
+                      chaos={chaos}
+                      setChaos={setChaos}
+                      quantization={quantization}
+                      setQuantization={setQuantization}
+                      redShiftX={redShiftX}
+                      setRedShiftX={setRedShiftX}
+                      redShiftY={redShiftY}
+                      setRedShiftY={setRedShiftY}
+                      greenShiftX={greenShiftX}
+                      setGreenShiftX={setGreenShiftX}
+                      greenShiftY={greenShiftY}
+                      setGreenShiftY={setGreenShiftY}
+                      blueShiftX={blueShiftX}
+                      setBlueShiftX={setBlueShiftX}
+                      blueShiftY={blueShiftY}
+                      setBlueShiftY={setBlueShiftY}
+                      globalRgbShiftIntensity={globalRgbShiftIntensity}
+                      setGlobalRgbShiftIntensity={setGlobalRgbShiftIntensity}
+                      sliceCount={sliceCount}
+                      setSliceCount={setSliceCount}
+                      maxOffset={maxOffset}
+                      setMaxOffset={setMaxOffset}
+                      randomness={randomness}
+                      setRandomness={setRandomness}
+                      scanlineThickness={scanlineThickness}
+                      setScanlineThickness={setScanlineThickness}
+                      scanlineGap={scanlineGap}
+                      setScanlineGap={setScanlineGap}
+                      flicker={flicker}
+                      setFlicker={setFlicker}
+                      curvature={curvature}
+                      setCurvature={setCurvature}
+                      maskTarget={maskTarget}
+                      setMaskTarget={setMaskTarget}
+                      maskFeather={maskFeather}
+                      setMaskFeather={setMaskFeather}
+                    />
+                  </InspectorWindow>
                 </div>
-
-              </div>
+              </aside>
             )}
           </div>
         </div>
 
         {!focusMode && (
-          <WorkflowDock
-            mode={workspaceMode}
-            hasImage={Boolean(originalImage)}
-            hasVideoSource={Boolean(videoSource)}
+          <AppFooterBars
+            focusMode={focusMode}
+            workspaceMode={workspaceMode}
+            originalImagePresent={Boolean(originalImage)}
+            videoSourcePresent={Boolean(videoSource)}
             backendConnected={backendConnected}
             imageSize={imageSize}
-            sourceLabel={currentSourceLabel}
+            currentSourceLabel={currentSourceLabel}
             videoMetadata={videoMetadata}
             activeAdjustments={activeAdjustments}
             algorithm={algorithm}
             palette={palette}
-            isRunningWorkflow={workflowBusy}
+            workflowBusy={workflowBusy}
             workflowStatus={workflowStatus}
             jobProgressText={jobProgressText}
             jobOutputPath={jobOutputPath}
-            onRunVideoWorkflow={handleRunVideoWorkflow}
-            onExportSvg={handleExportSvg}
-            onRunAnimationWorkflow={handleRunAnimationWorkflow}
-            onQueueAnimationRender={handleQueueAnimationFileRender}
-            onCancelJob={handleCancelActiveJob}
-            canQueueAnimationRender={Boolean(originalImage)}
             canRenderVideo={canRenderVideo}
             videoRenderBlockedReason={videoRenderBlockedReason}
-          />
-        )}
-
-        {!focusMode && (
-          <StatusBar
             status={status}
-            imageSize={imageSize}
-            backendConnected={backendConnected}
-            workspaceMode={workspaceMode}
-            workflowStatus={workflowStatus}
-            jobProgressText={jobProgressText}
+            onRunVideoWorkflow={handleRunVideoWorkflow}
+            onExportSvg={handleExportSvg}
+            onCancelActiveJob={handleCancelActiveJob}
           />
         )}
       </div>
       </div>
       </TooltipProvider>
       
-      {showColorStudio && (
-        <ColorStudioDialog
-          initialColors={customColors}
-          quantizationMethod={quantizationMethod}
-          setQuantizationMethod={setQuantizationMethod}
-          quantizationColorCount={quantizationColorCount}
-          setQuantizationColorCount={setQuantizationColorCount}
-          canAutoQuantize={Boolean(originalImage || processedImage)}
-          isQuantizing={quantizingPalette}
-          onExtractFromImage={handleExtractPaletteFromCurrentImage}
-          onSave={handleSavePalette}
-          onClose={() => setShowColorStudio(false)}
-        />
-      )}
-      
-      {showAbout && <AboutDialog onClose={() => setShowAbout(false)} />}
-      
-      {showShortcuts && <ShortcutsDialog onClose={() => setShowShortcuts(false)} />}
-      
-      {showPresetManager && (
-        <PresetManager
-          currentSettings={{
-            algorithm,
-            palette,
-            intensity,
-            contrast,
-            brightness,
-            saturation,
-            pixelSize,
-            blur,
-            sharpness,
-            noise,
-          }}
-          onClose={() => setShowPresetManager(false)}
-          onLoadPreset={handleLoadPreset}
-        />
-      )}
-
-      {(workflowBusy || Boolean(jobId)) && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/30 backdrop-blur-[1px]">
-          <div className="win95-window w-[360px] max-w-[92vw] p-2">
-            <div className="win95-titlebar">
-              <span>Render in progress</span>
-              <span className="text-[10px] uppercase">{jobKind ?? "workflow"}</span>
-            </div>
-            <div className="mt-2 space-y-2 px-1 pb-1 text-[11px]">
-              <div className="flex items-center justify-between">
-                <span className="font-bold">
-                  {workflowStatus ?? "Rendering..."}
-                </span>
-                <span className="text-muted-foreground">{jobProgressPercent}%</span>
-              </div>
-
-              <div className="win95-border-inset h-4 bg-input p-[2px]">
-                <div
-                  className="h-full bg-primary transition-[width] duration-300"
-                  style={{ width: `${jobProgressPercent}%` }}
-                />
-              </div>
-
-              <div className="win95-border-inset px-2 py-1 text-[10px] text-muted-foreground">
-                Frames: {jobProgress?.current_frame ?? 0} / {jobProgress?.total_frames ?? 0}
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-1">
-                <button
-                  type="button"
-                  className="win95-button px-2 py-1 text-[11px]"
-                  onClick={handleCancelActiveJob}
-                  disabled={!jobId}
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <AppOverlays
+        showColorStudio={showColorStudio}
+        onCloseColorStudio={() => setShowColorStudio(false)}
+        customColors={customColors}
+        quantizationMethod={quantizationMethod}
+        setQuantizationMethod={setQuantizationMethod}
+        quantizationColorCount={quantizationColorCount}
+        setQuantizationColorCount={setQuantizationColorCount}
+        canAutoQuantize={Boolean(originalImage || processedImage)}
+        quantizingPalette={quantizingPalette}
+        onExtractFromImage={handleExtractPaletteFromCurrentImage}
+        onSavePalette={handleSavePalette}
+        showAbout={showAbout}
+        onCloseAbout={() => setShowAbout(false)}
+        showShortcuts={showShortcuts}
+        onCloseShortcuts={() => setShowShortcuts(false)}
+        showPresetManager={showPresetManager}
+        onClosePresetManager={() => setShowPresetManager(false)}
+        presetSettings={{
+          algorithm,
+          palette,
+          intensity,
+          contrast,
+          brightness,
+          saturation,
+          pixelSize,
+          blur,
+          sharpness,
+          noise,
+        }}
+        onLoadPreset={handleLoadPreset}
+        workflowBusy={workflowBusy}
+        jobId={jobId}
+        jobKind={jobKind}
+        workflowStatus={workflowStatus}
+        jobProgressPercent={jobProgressPercent}
+        jobProgress={jobProgress}
+        onCancelActiveJob={handleCancelActiveJob}
+      />
     </div>
   );
 };

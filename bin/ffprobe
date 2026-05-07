@@ -1,0 +1,12 @@
+#!/bin/sh
+# Wrapper to choose platform-specific ffprobe sidecar if present, else fallback to system ffprobe
+HERE="$(cd "$(dirname "$0")" && pwd)"
+if [ -x "$HERE/ffprobe" ] && [ "$(readlink "$HERE/ffprobe" 2>/dev/null || echo)" = "" ]; then
+  exec "$HERE/ffprobe" "$@"
+fi
+for f in "$HERE"/ffprobe-*; do
+  if [ -x "$f" ]; then
+    exec "$f" "$@"
+  fi
+done
+exec ffprobe "$@"

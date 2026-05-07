@@ -3,9 +3,13 @@ import { useState } from "react";
 interface MenuBarProps {
   onOpenFile?: () => void;
   onSaveImage?: () => void;
+  onSaveProject?: () => void;
+  onOpenProject?: () => void;
   onExport?: () => void;
   onExportSvg?: () => void;
   onReset?: () => void;
+  onUndo?: () => void;
+  onRedo?: () => void;
   onShowAbout?: () => void;
   onShowShortcuts?: () => void;
   onSavePreset?: () => void;
@@ -20,9 +24,13 @@ interface MenuBarProps {
 export const MenuBar = ({
   onOpenFile,
   onSaveImage,
+  onSaveProject,
+  onOpenProject,
   onExport,
   onExportSvg,
   onReset,
+  onUndo,
+  onRedo,
   onShowAbout,
   onShowShortcuts,
   onSavePreset,
@@ -36,13 +44,17 @@ export const MenuBar = ({
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
 
   const shortcuts: Record<string, string> = {
-    Open: "Ctrl/Cmd+O",
-    Save: "Ctrl/Cmd+S",
-    Export: "Ctrl/Cmd+E",
+    "Open Image": "Cmd+O",
+    "Open Project": "Cmd+Shift+O",
+    "Save Project": "Cmd+S",
+    "Export Image": "Cmd+Shift+S",
+    Export: "Cmd+E",
     "Export SVG": "",
     "Import Preset": "",
     "Export Preset": "",
-    Reset: "Ctrl/Cmd+R",
+    Reset: "Cmd+R",
+    Undo: "Cmd+Z",
+    Redo: "Cmd+Shift+Z",
     Shortcuts: "?",
   };
 
@@ -51,13 +63,17 @@ export const MenuBar = ({
     
     switch (menu) {
       case "File":
-        if (item === "Open") onOpenFile?.();
-        else if (item === "Save") onSaveImage?.();
+        if (item === "Open Image") onOpenFile?.();
+        else if (item === "Open Project") onOpenProject?.();
+        else if (item === "Save Project") onSaveProject?.();
+        else if (item === "Export Image") onSaveImage?.();
         else if (item === "Export") onExport?.();
         else if (item === "Export SVG") onExportSvg?.();
         break;
       case "Edit":
-        if (item === "Reset") onReset?.();
+        if (item === "Undo") onUndo?.();
+        else if (item === "Redo") onRedo?.();
+        else if (item === "Reset") onReset?.();
         break;
       case "Presets":
         if (item === "Save Preset") onSavePreset?.();
@@ -74,8 +90,8 @@ export const MenuBar = ({
   };
 
   const menus = [
-    { label: "File", items: ["Open", "Save", "Export", "Export SVG"] },
-    { label: "Edit", items: ["Reset"] },
+    { label: "File", items: ["Open Image", "Open Project", "Save Project", "Export Image", "Export", "Export SVG"] },
+    { label: "Edit", items: ["Undo", "Redo", "Reset"] },
     { label: "Presets", items: ["Save Preset", "Load Preset", "Export Preset", "Import Preset", "Manage Presets"] },
     { label: "Help", items: ["About", "Shortcuts"] },
   ];

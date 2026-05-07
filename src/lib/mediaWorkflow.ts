@@ -207,6 +207,61 @@ export async function extractVideoFrames(
   }
 }
 
+/**
+ * Extract a single video frame at the specified timestamp in FULL resolution.
+ * Use this for rendering — unlike extractVideoFrames (which caps at 480px),
+ * this returns the native video dimensions so WYSIWYG is preserved.
+ */
+export async function extractSingleVideoFrame(
+  file: File,
+  timestampSecs: number,
+): Promise<{ width: number; height: number; rgba: Uint8ClampedArray }> {
+  const url = URL.createObjectURL(file);
+  const video = document.createElement("video");
+  video.src = url;
+  video.preload = "metadata";
+  video.muted = true;
+  video.playsInline = true;
+
+  try {
+    await waitForEvent(video, "loadedmetadata");
+
+    const width = Math.max(1, Math.floor(video.videoWidth));
+    const height = Math.max(1, Math.floor(video.videoHeight));
+    const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0;
+
+    await new Promise<void>((resolve, reject) => {
+      const onSeeked = () => {
+        video.removeEventListener("seeked", onSeeked);
+        video.removeEventListener("error", onError);
+        resolve();
+      };
+      const onError = (e: Event) => {
+        video.removeEventListener("seeked", onSeeked);
+        video.removeEventListener("error", onError);
+        reject(new Error(`Seek error: ${(e as ErrorEvent).message ?? "unknown"}`));
+      };
+      video.addEventListener("seeked", onSeeked, { once: true });
+      video.addEventListener("error", onError, { once: true });
+      video.currentTime = Math.max(0, Math.min(timestampSecs, Math.max(duration - 0.001, 0)));
+    });
+
+    // Let the browser flush decoded pixels
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) throw new Error("Failed to create canvas context");
+
+    ctx.drawImage(video, 0, 0, width, height);
+    return { width, height, rgba: ctx.getImageData(0, 0, width, height).data.slice() };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 export function rgbaToImage(rgba: Uint8ClampedArray | number[], width: number, height: number): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const canvas = document.createElement("canvas");

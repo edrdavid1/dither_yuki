@@ -14,6 +14,7 @@ interface PreviewPanelProps {
   onAnimationFpsChange?: (value: number) => void;
   animationSpeed?: number;
   onAnimationSpeedChange?: (value: number) => void;
+  onFileDrop?: (file: File) => void;
 }
 
 export const PreviewPanel = ({ 
@@ -29,7 +30,23 @@ export const PreviewPanel = ({
   onAnimationFpsChange,
   animationSpeed = 1,
   onAnimationSpeedChange,
+  onFileDrop,
 }: PreviewPanelProps) => {
+  const [dragOver, setDragOver] = useState(false);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback(() => setDragOver(false), []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file) onFileDrop?.(file);
+  }, [onFileDrop]);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(1);
@@ -88,13 +105,24 @@ export const PreviewPanel = ({
   const imageToShow = showOriginal ? originalImage : processedImage;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2">
-      <div ref={containerRef} className="flex-1 overflow-auto win98-scroll win95-border-inset bg-white/90 p-4 relative">
+    <div className="flex min-h-0 flex-1 flex-col gap-1">
+      <div
+        ref={containerRef}
+        className={`win98-scroll-area win98-scroll flex-1 win95-border-inset bg-white/90 p-1 relative transition-colors${dragOver ? " !bg-blue-50 outline-2 outline-dashed outline-[#000080]" : ""}`}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+        {dragOver && (
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black/10">
+            <span className="win98-badge text-sm px-4 py-2">Drop to open</span>
+          </div>
+        )}
         {imageToShow ? (
           <div className="flex min-h-full min-w-full items-start justify-start">
             <canvas 
               ref={canvasRef}
-              className="max-w-full h-auto bg-white shadow-[8px_8px_0_rgba(0,0,0,0.18)]"
+              className="max-w-full h-auto bg-white"
               style={{ 
                 imageRendering: 'pixelated',
                 transform: `scale(${zoom})`,
@@ -104,15 +132,15 @@ export const PreviewPanel = ({
           </div>
         ) : (
           <div className="win98-empty-state">
-            <div className="win98-badge"><Image className="h-3 w-3" /> Empty canvas</div>
-            <div className="text-base font-bold text-foreground">Drop in an image to start shaping the look</div>
-            <p className="max-w-md text-xs">The workflow is simple: open a file, tune the recipe on the left, then compare the original and processed result on this stage.</p>
+            <div className="win98-badge"><Image className="h-3 w-3" /> No image</div>
+            <div className="text-sm font-bold text-foreground">Drop an image or video here</div>
+            <p className="text-[10px] text-muted-foreground">or use File → Open</p>
           </div>
         )}
       </div>
       
-      <div className="win95-panel preview-controlbar flex flex-wrap gap-1.5 justify-between">
-        <div className="flex gap-2">
+      <div className="win95-panel flex flex-wrap gap-1 justify-between">
+        <div className="flex gap-1">
           <button 
             className={`win95-button text-[11px] px-2 py-0.5 ${showOriginal ? 'bg-primary text-primary-foreground' : ''}`}
             onClick={() => setShowOriginal(true)}
@@ -164,7 +192,7 @@ export const PreviewPanel = ({
           </div>
         )}
         
-        <div className="flex gap-1">
+        <div className="flex gap-[1px]">
           <button 
             className="win95-button p-0.5 px-1.5"
             onClick={() => setZoom(Math.max(0.25, zoom - 0.25))}
@@ -189,7 +217,7 @@ export const PreviewPanel = ({
           </button>
         </div>
 
-        <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+        <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
           <Search className="h-3 w-3" />
           {imageToShow ? `${imageToShow.width}×${imageToShow.height} preview surface` : "No preview surface yet"}
         </div>

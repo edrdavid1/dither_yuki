@@ -20,10 +20,7 @@ interface WorkflowDockProps {
   jobOutputPath?: string | null;
   onRunVideoWorkflow: () => void;
   onExportSvg: () => void;
-  onRunAnimationWorkflow: () => void;
-  onQueueAnimationRender: () => void;
   onCancelJob: () => void;
-  canQueueAnimationRender: boolean;
   canRenderVideo: boolean;
   videoRenderBlockedReason?: string;
 }
@@ -45,10 +42,7 @@ export const WorkflowDock = ({
   jobOutputPath,
   onRunVideoWorkflow,
   onExportSvg,
-  onRunAnimationWorkflow,
-  onQueueAnimationRender,
   onCancelJob,
-  canQueueAnimationRender,
   canRenderVideo,
   videoRenderBlockedReason,
 }: WorkflowDockProps) => {
@@ -106,38 +100,7 @@ export const WorkflowDock = ({
           </Tooltip>
         )}
 
-        {mode === "animation" && (
-          <>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  className="win95-button win98-icon-button"
-                  onClick={onRunAnimationWorkflow}
-                  disabled={isRunningWorkflow || !hasImage}
-                  aria-label="Run still animation"
-                >
-                  <ICONS.WORKSPACE_ANIMATION />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>Run still animation</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  className="win95-button win98-icon-button"
-                  onClick={onQueueAnimationRender}
-                  disabled={isRunningWorkflow || !canQueueAnimationRender}
-                  aria-label="Queue final render"
-                >
-                  <ICONS.PIPELINE_ADD />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>Queue final render</TooltipContent>
-            </Tooltip>
-          </>
-        )}
+
 
         {(jobProgressText?.includes("queued") || jobProgressText?.includes("running")) && (
           <Tooltip>
@@ -156,7 +119,7 @@ export const WorkflowDock = ({
         )}
 
         <div className="ml-auto min-w-0 truncate text-[10px] text-muted-foreground">
-          {statusText} · {algorithm} · {palette} · {activeAdjustments} · {sourceText}
+          {statusText} · {algorithm} · {palette} · {activeAdjustments} tweaks · {sourceText}
           {videoMetadata && mode === "video" ? ` · ${videoMetadata.width}x${videoMetadata.height} @ ${videoMetadata.fps.toFixed(2)}fps` : ""}
           {jobOutputPath ? ` · ${jobOutputPath}` : ""}
           {!backendConnected ? " · backend offline" : ""}

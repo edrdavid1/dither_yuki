@@ -48,6 +48,7 @@ pub use color::{
 };
 pub use video::{
     export_frames_pack, list_temporal_variation_modes, prepare_video_layers, process_frame_batch,
+    ChannelMask,
     process_frame_batch_packed,
     process_single_video_frame, process_single_video_frame_with_animation, reorder_layers,
     render_still_image_animation, list_animation_easing_modes,

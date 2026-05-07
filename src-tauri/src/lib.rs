@@ -1,6 +1,7 @@
 mod image_engine;
 mod commands;
 mod video_processing;
+mod project;
 
 use commands::{
   extract_palette,
@@ -20,10 +21,18 @@ use commands::{
   save_bytes_to_default_location,
   save_bytes_to_path,
 };
+use project::{save_project, load_project};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+  let project_state = project::new_shared_state();
+  let state_for_protocol = project_state.clone();
+
   tauri::Builder::default()
+    .manage(project_state)
+    .register_asynchronous_uri_scheme_protocol("dyproj", move |_ctx, request, responder| {
+      project::protocol::handle_dyproj_request(request, state_for_protocol.clone(), responder);
+    })
     .plugin(tauri_plugin_dialog::init())
     .setup(|app| {
       if cfg!(debug_assertions) {
@@ -64,7 +73,9 @@ pub fn run() {
       save_bytes_to_default_location,
       save_bytes_to_path,
       export_pattern_preset,
-      import_pattern_preset
+      import_pattern_preset,
+      save_project,
+      load_project,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
