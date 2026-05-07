@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { X } from "lucide-react";
 import { ArrowDownBox, Delete } from "pixelarticons/react";
 import { toast } from "sonner";
 
@@ -80,7 +81,7 @@ export const PresetManager = ({ currentSettings, onClose, onLoadPreset }: Preset
             onClick={onClose}
             className="bg-card px-2 text-xs border border-win95-light hover:bg-muted"
           >
-            <Delete className="h-3 w-3" />
+            <X className="h-3 w-3" />
           </button>
         </div>
         

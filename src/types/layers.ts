@@ -1,4 +1,7 @@
 import { DEFAULT_FRAME_SETTINGS, type FrameSettings } from "./frameSettings";
+import { getPaletteColors, normalizeColorPalette, normalizeDitheringAlgorithm } from "@/utils/dithering";
+
+export type { ColorPalette, DitheringAlgorithm } from "@/utils/dithering";
 
 export type LayerType = "image" | "generator" | "adjustment";
 export type LayerBlendMode = "normal" | "multiply" | "screen" | "overlay" | "add";
@@ -92,11 +95,14 @@ export function cloneLayers(layers: Layer[]): Layer[] {
 
 const FRONTEND_TO_BACKEND_PALETTE: Partial<Record<string, string>> = {
   Gameboy: "GameBoy",
+  GameBoy: "GameBoy",
   C64: "Commodore 64",
+  "Commodore 64": "Commodore 64",
 };
 
 export function toBackendPaletteName(palette: string): string {
-  return FRONTEND_TO_BACKEND_PALETTE[palette] ?? palette;
+  const normalized = normalizeColorPalette(palette);
+  return FRONTEND_TO_BACKEND_PALETTE[normalized] ?? normalized;
 }
 
 export function buildBackendLayersPayload(
@@ -111,7 +117,7 @@ export function buildBackendLayersPayload(
     const s = layer.settings;
     const common: BackendEffectLayerPayload = {
       id: layer.id,
-      algorithm: String(s.algorithm ?? "Floyd-Steinberg"),
+      algorithm: normalizeDitheringAlgorithm(String(s.algorithm ?? "Floyd-Steinberg")),
       enabled: layer.visible && !layer.locked,
       intensity: Number(s.intensity ?? 100),
       blend_mode: String(s.blendMode ?? layer.blendMode),
@@ -157,7 +163,9 @@ export function buildBackendLayersPayload(
     if (String(s.palette ?? "Grayscale") === "Custom") {
       payload.push({
         ...common,
-        palette: customPalette,
+        palette: customPalette.length > 0
+          ? customPalette
+          : getPaletteColors("Grayscale").map((color) => [color[0] ?? 0, color[1] ?? 0, color[2] ?? 0] as [number, number, number]),
       });
     } else {
       payload.push({

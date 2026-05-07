@@ -221,7 +221,7 @@ export const ControlPanel = ({
         <div className="win98-card">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <div className="win98-section-title">Inspector</div>
+              <div className="win98-section-title">Controls</div>
               <div className="text-sm font-bold">Dithering & Glitching</div>
             </div>
             <div className="win98-badge">{activeTweaks} tweaks</div>
@@ -232,6 +232,13 @@ export const ControlPanel = ({
           <div className="win98-section-title flex items-center justify-between gap-2">
             <span>Global & Colors</span>
             <Hint text="Palette, glitch snap-to-palette, and global seed for random parameters." />
+          </div>
+
+          <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+            <span>Glitch effect</span>
+            <span className="win95-border-inset px-2 py-0.5 text-[10px] text-foreground">
+              {glitchType}
+            </span>
           </div>
 
           <div>

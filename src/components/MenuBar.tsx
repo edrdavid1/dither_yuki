@@ -2,6 +2,7 @@ import { useState } from "react";
 
 interface MenuBarProps {
   onOpenFile?: () => void;
+  onNewProject?: () => void;
   onSaveImage?: () => void;
   onSaveProject?: () => void;
   onOpenProject?: () => void;
@@ -23,6 +24,7 @@ interface MenuBarProps {
 
 export const MenuBar = ({
   onOpenFile,
+  onNewProject,
   onSaveImage,
   onSaveProject,
   onOpenProject,
@@ -44,7 +46,8 @@ export const MenuBar = ({
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
 
   const shortcuts: Record<string, string> = {
-    "Open Image": "Cmd+O",
+    "New Project": "Cmd+N",
+    "Open File": "Cmd+O",
     "Open Project": "Cmd+Shift+O",
     "Save Project": "Cmd+S",
     "Export Image": "Cmd+Shift+S",
@@ -63,7 +66,8 @@ export const MenuBar = ({
     
     switch (menu) {
       case "File":
-        if (item === "Open Image") onOpenFile?.();
+        if (item === "New Project") onNewProject?.();
+        else if (item === "Open File") onOpenFile?.();
         else if (item === "Open Project") onOpenProject?.();
         else if (item === "Save Project") onSaveProject?.();
         else if (item === "Export Image") onSaveImage?.();
@@ -90,7 +94,7 @@ export const MenuBar = ({
   };
 
   const menus = [
-    { label: "File", items: ["Open Image", "Open Project", "Save Project", "Export Image", "Export", "Export SVG"] },
+    { label: "File", items: ["New Project", "Open File", "Open Project", "Save Project", "Export Image", "Export", "Export SVG"] },
     { label: "Edit", items: ["Undo", "Redo", "Reset"] },
     { label: "Presets", items: ["Save Preset", "Load Preset", "Export Preset", "Import Preset", "Manage Presets"] },
     { label: "Help", items: ["About", "Shortcuts"] },

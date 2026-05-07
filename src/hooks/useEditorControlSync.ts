@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { ColorPalette, DitheringAlgorithm } from "@/types/layers";
+import { normalizeColorPalette, normalizeDitheringAlgorithm } from "@/utils/dithering";
 import type { FrameSettings } from "@/types/frameSettings";
 
 export interface EditorControlSyncValues {
@@ -164,8 +165,8 @@ export function useEditorControlSync({ values, setters }: UseEditorControlSyncAr
   }), [values]);
 
   const applyEffectParams = useCallback((params: Partial<FrameSettings>) => {
-    setters.setAlgorithm(String(params.algorithm ?? "Floyd-Steinberg") as DitheringAlgorithm);
-    setters.setPalette(String(params.palette ?? "Grayscale") as ColorPalette);
+    setters.setAlgorithm(normalizeDitheringAlgorithm(String(params.algorithm ?? "Floyd-Steinberg")) as DitheringAlgorithm);
+    setters.setPalette(normalizeColorPalette(String(params.palette ?? "Grayscale")) as ColorPalette);
     setters.setIntensity(Number(params.intensity ?? 100));
     setters.setContrast(Number(params.contrast ?? 100));
     setters.setBrightness(Number(params.brightness ?? 100));

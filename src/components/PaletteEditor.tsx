@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { X } from "lucide-react";
 import { ChevronsVertical, Delete, Plus, Repeat } from "pixelarticons/react";
 
 interface PaletteEditorProps {
@@ -128,7 +129,7 @@ export const PaletteEditor = ({ onSave, onClose, initialColors = ["#000000", "#F
             className="bg-card px-2 text-xs border border-win95-light hover:bg-muted"
             onClick={onClose}
           >
-            <Delete className="h-3 w-3" />
+            <X className="h-3 w-3" />
           </button>
         </div>
         

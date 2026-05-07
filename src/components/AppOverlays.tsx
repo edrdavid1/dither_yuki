@@ -1,5 +1,6 @@
 import { AboutDialog } from "@/components/AboutDialog";
 import { ColorStudioDialog } from "@/components/ColorStudioDialog";
+import { ExitWarningDialog } from "@/components/ExitWarningDialog";
 import { PresetManager } from "@/components/PresetManager";
 import { ShortcutsDialog } from "@/components/ShortcutsDialog";
 
@@ -40,6 +41,12 @@ interface AppOverlaysProps {
   presetSettings: PresetSettings;
   onLoadPreset: (preset: any) => void;
 
+  showExitWarning: boolean;
+  isSavingExitWarning: boolean;
+  onSaveAndExit: () => void;
+  onDiscardAndExit: () => void;
+  onCancelExitWarning: () => void;
+
   workflowBusy: boolean;
   jobId: string | null;
   jobKind: string | null;
@@ -69,6 +76,11 @@ export const AppOverlays = ({
   onClosePresetManager,
   presetSettings,
   onLoadPreset,
+  showExitWarning,
+  isSavingExitWarning,
+  onSaveAndExit,
+  onDiscardAndExit,
+  onCancelExitWarning,
   workflowBusy,
   jobId,
   jobKind,
@@ -104,6 +116,14 @@ export const AppOverlays = ({
           onLoadPreset={onLoadPreset}
         />
       )}
+
+      <ExitWarningDialog
+        open={showExitWarning}
+        isSaving={isSavingExitWarning}
+        onSaveAndExit={onSaveAndExit}
+        onDiscardAndExit={onDiscardAndExit}
+        onCancel={onCancelExitWarning}
+      />
 
       {(workflowBusy || Boolean(jobId)) && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/30 backdrop-blur-[1px]">

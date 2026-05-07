@@ -1,4 +1,4 @@
-import { Delete } from "pixelarticons/react";
+import { X } from "lucide-react";
 
 interface ShortcutsDialogProps {
   onClose: () => void;
@@ -8,7 +8,8 @@ export const ShortcutsDialog = ({ onClose }: ShortcutsDialogProps) => {
   const isMac = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac');
   const mod = isMac ? 'Cmd' : 'Ctrl';
   const shortcuts = [
-    { key: `${mod} + O`, action: "Open Image" },
+    { key: `${mod} + N`, action: "New Project" },
+    { key: `${mod} + O`, action: "Open File" },
     { key: `${mod} + Shift + O`, action: "Open Project (.dyproj)" },
     { key: `${mod} + S`, action: "Save Project (.dyproj)" },
     { key: `${mod} + Shift + S`, action: "Export Image (PNG)" },
@@ -33,7 +34,7 @@ export const ShortcutsDialog = ({ onClose }: ShortcutsDialogProps) => {
             onClick={onClose}
             className="bg-card px-2 text-xs border border-win95-light hover:bg-muted"
           >
-            <Delete className="h-3 w-3" />
+            <X className="h-3 w-3" />
           </button>
         </div>
         <div className="p-6 space-y-4">

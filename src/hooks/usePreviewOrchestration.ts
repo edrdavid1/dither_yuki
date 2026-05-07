@@ -39,7 +39,6 @@ export function usePreviewOrchestration({
       return;
     }
 
-    setStatus("Processing...");
     setPreviewProcessing(true);
 
     try {
@@ -68,13 +67,12 @@ export function usePreviewOrchestration({
       processedImg.onload = () => {
         setProcessedImage(processedImg);
         setShowOriginal(false);
-        setStatus("Ready");
       };
       processedImg.src = canvas.toDataURL();
     } catch (error) {
       console.error("Error applying filter:", error);
-      toast.error("Failed to apply filter");
-      setStatus("Error");
+      const message = error instanceof Error ? error.message : String(error);
+      toast.error(`Failed to apply filter${message ? `: ${message}` : ""}`);
     } finally {
       setPreviewProcessing(false);
     }

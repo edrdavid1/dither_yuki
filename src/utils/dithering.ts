@@ -1,34 +1,68 @@
 // Dithering algorithms for image processing
 
-export type DitheringAlgorithm = 
-  | "None"
-  | "Floyd-Steinberg"
-  | "Jarvis-Judice-Ninke"
-  | "Sierra"
-  | "Atkinson"
-  | "Ordered"
-  | "Bayer 2x2"
-  | "Bayer 4x4"
-  | "Bayer 8x8"
-  | "Random";
+import {
+  normalizeColorPalette,
+  normalizeDitheringAlgorithm,
+  type ColorPalette,
+  type DitheringAlgorithm,
+} from "@/lib/catalog";
 
-export type ColorPalette = 
-  | "Grayscale"
-  | "CGA"
-  | "EGA"
-  | "Gameboy"
-  | "C64"
-  | "ZX Spectrum"
-  | "Apple II"
-  | "Custom";
+export {
+  COLOR_PALETTES,
+  COLOR_PALETTE_NAMES,
+  DITHERING_ALGORITHMS,
+  DITHERING_ALGORITHM_NAMES,
+  normalizeColorPalette,
+  normalizeDitheringAlgorithm,
+} from "@/lib/catalog";
 
-const palettes: Record<ColorPalette, number[][]> = {
+export type { ColorPalette, DitheringAlgorithm } from "@/lib/catalog";
+
+function clamp(v: number): number {
+  return Math.max(0, Math.min(255, Math.round(v)));
+}
+
+function tintPalette(base: number[][], tint: [number, number, number]): number[][] {
+  return base.map((color) => [
+    clamp((color[0] ?? 0) + tint[0]),
+    clamp((color[1] ?? 0) + tint[1]),
+    clamp((color[2] ?? 0) + tint[2]),
+  ]);
+}
+
+function grayscaleSteps(levels: number): number[][] {
+  if (levels <= 1) {
+    return [[0, 0, 0]];
+  }
+
+  return Array.from({ length: levels }, (_, i) => {
+    const v = Math.round((i / (levels - 1)) * 255);
+    return [v, v, v];
+  });
+}
+
+function gradientPalette(start: [number, number, number], end: [number, number, number], levels: number): number[][] {
+  return Array.from({ length: levels }, (_, i) => {
+    const t = levels <= 1 ? 0 : i / (levels - 1);
+    return [
+      Math.round(start[0] * (1 - t) + end[0] * t),
+      Math.round(start[1] * (1 - t) + end[1] * t),
+      Math.round(start[2] * (1 - t) + end[2] * t),
+    ];
+  });
+}
+
+const palettes: Record<string, number[][]> = {
   "Grayscale": [
     [0, 0, 0],
     [85, 85, 85],
     [170, 170, 170],
     [255, 255, 255]
   ],
+  "Grayscale 2": grayscaleSteps(2),
+  "Grayscale 4": grayscaleSteps(4),
+  "Grayscale 8": grayscaleSteps(8),
+  "Grayscale 16": grayscaleSteps(16),
   "CGA": [
     [0, 0, 0],
     [0, 170, 170],
@@ -57,11 +91,35 @@ const palettes: Record<ColorPalette, number[][]> = {
     [255, 255, 85],
     [255, 255, 255]
   ],
+  "GameBoy": [
+    [15, 56, 15],
+    [48, 98, 48],
+    [139, 172, 15],
+    [155, 188, 15]
+  ],
   "Gameboy": [
     [15, 56, 15],
     [48, 98, 48],
     [139, 172, 15],
     [155, 188, 15]
+  ],
+  "Commodore 64": [
+    [0, 0, 0],
+    [255, 255, 255],
+    [136, 0, 0],
+    [170, 255, 238],
+    [204, 68, 204],
+    [0, 204, 85],
+    [0, 0, 170],
+    [238, 238, 119],
+    [221, 136, 85],
+    [102, 68, 0],
+    [255, 119, 119],
+    [51, 51, 51],
+    [119, 119, 119],
+    [170, 255, 102],
+    [0, 136, 255],
+    [187, 187, 187]
   ],
   "C64": [
     [0, 0, 0],
@@ -109,11 +167,94 @@ const palettes: Record<ColorPalette, number[][]> = {
     [141, 217, 191],
     [255, 255, 255]
   ],
+  "VGA 16": [
+    [0, 0, 0],
+    [0, 0, 170],
+    [0, 170, 0],
+    [0, 170, 170],
+    [170, 0, 0],
+    [170, 0, 170],
+    [170, 85, 0],
+    [170, 170, 170],
+    [85, 85, 85],
+    [85, 85, 255],
+    [85, 255, 85],
+    [85, 255, 255],
+    [255, 85, 85],
+    [255, 85, 255],
+    [255, 255, 85],
+    [255, 255, 255],
+  ],
+  "Windows 3.11": [
+    [0, 0, 0],
+    [128, 0, 0],
+    [0, 128, 0],
+    [128, 128, 0],
+    [0, 0, 128],
+    [128, 0, 128],
+    [0, 128, 128],
+    [192, 192, 192],
+    [128, 128, 128],
+    [255, 0, 0],
+    [0, 255, 0],
+    [255, 255, 0],
+    [0, 0, 255],
+    [255, 0, 255],
+    [0, 255, 255],
+    [255, 255, 255],
+  ],
+  "Master System": gradientPalette([0, 0, 0], [255, 255, 255], 16),
+  "Sega Genesis": gradientPalette([0, 0, 32], [255, 255, 192], 16),
+  "SNES": gradientPalette([16, 16, 16], [240, 240, 240], 16),
+  "Vaporwave": gradientPalette([255, 105, 180], [0, 255, 255], 8),
+  "Cyberpunk": gradientPalette([10, 10, 25], [255, 0, 180], 8),
+  "Sepia": gradientPalette([30, 20, 10], [240, 220, 170], 8),
+  "Vintage Film": gradientPalette([25, 22, 16], [222, 198, 154], 8),
+  "Noir": gradientPalette([0, 0, 0], [210, 210, 210], 8),
+  "Synth Sunset": gradientPalette([30, 0, 60], [255, 170, 80], 8),
+  "Ocean Mist": gradientPalette([10, 40, 70], [180, 240, 255], 8),
+  "Forest Moss": gradientPalette([10, 30, 10], [170, 210, 120], 8),
+  "Desert Sand": gradientPalette([40, 24, 8], [240, 210, 150], 8),
+  "Neon Lime": gradientPalette([10, 20, 10], [190, 255, 40], 8),
+  "Plasma": gradientPalette([25, 0, 70], [255, 70, 200], 8),
+  "Lavender": gradientPalette([30, 20, 50], [220, 180, 255], 8),
+  "Amber Glow": gradientPalette([30, 18, 0], [255, 190, 40], 8),
+  "Ice Blue": gradientPalette([5, 20, 40], [180, 230, 255], 8),
+  "Rose Gold": gradientPalette([50, 20, 24], [255, 210, 190], 8),
+  "Teal Punch": gradientPalette([0, 40, 40], [80, 255, 220], 8),
+  "Night Drive": gradientPalette([5, 5, 18], [130, 170, 255], 8),
+  "Arcade": gradientPalette([20, 0, 40], [255, 255, 80], 8),
+  "Paper Ink": gradientPalette([35, 33, 26], [245, 242, 228], 8),
+  "CRT Warm": gradientPalette([20, 16, 8], [255, 220, 170], 8),
+  "CRT Cool": gradientPalette([8, 16, 20], [170, 220, 255], 8),
+  "LCD Soft": gradientPalette([18, 22, 30], [210, 220, 240], 8),
+  "Aurora": gradientPalette([10, 30, 35], [180, 255, 200], 8),
+  "Ember": gradientPalette([30, 8, 4], [255, 120, 60], 8),
+  "Pastel Dream": gradientPalette([150, 150, 190], [255, 230, 220], 8),
+  "Mono Green": tintPalette(grayscaleSteps(8), [-140, 10, -140]),
+  "Mono Amber": tintPalette(grayscaleSteps(8), [40, 10, -120]),
+  "Mono Cyan": tintPalette(grayscaleSteps(8), [-120, 20, 20]),
+  "Mono Purple": tintPalette(grayscaleSteps(8), [30, -120, 40]),
+  "Sunset 8": gradientPalette([40, 0, 40], [255, 180, 80], 8),
+  "Ocean 8": gradientPalette([0, 20, 40], [100, 220, 255], 8),
+  "Candy 8": gradientPalette([255, 80, 180], [255, 255, 150], 8),
+  "Matrix": tintPalette(grayscaleSteps(8), [-150, 0, -150]),
+  "Terminal": tintPalette(grayscaleSteps(8), [-120, -20, -120]),
+  "Dusk": gradientPalette([20, 20, 60], [255, 170, 190], 8),
+  "Dawn": gradientPalette([30, 30, 80], [255, 220, 150], 8),
+  "Infrared": gradientPalette([10, 0, 0], [255, 80, 20], 8),
+  "Blueprint": gradientPalette([0, 15, 60], [140, 200, 255], 8),
+  "Toxic": gradientPalette([20, 40, 0], [220, 255, 40], 8),
+  "Peach": gradientPalette([70, 20, 10], [255, 210, 170], 8),
+  "Mint": gradientPalette([20, 50, 35], [200, 255, 220], 8),
+  "Royal": gradientPalette([20, 10, 70], [180, 170, 255], 8),
+  "Copper": gradientPalette([40, 20, 10], [230, 150, 90], 8),
   "Custom": [[0, 0, 0], [255, 255, 255]]
 };
 
 export function getPaletteColors(palette: ColorPalette): number[][] {
-  return (palettes[palette] ?? []).map((color) => [color[0], color[1], color[2]]);
+  const normalized = normalizeColorPalette(palette);
+  return (palettes[normalized] ?? []).map((color) => [color[0], color[1], color[2]]);
 }
 
 export function setCustomPalette(hexColors: string[]) {

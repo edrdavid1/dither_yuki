@@ -3,6 +3,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
+import { X } from "lucide-react";
 import { Camera, ChevronsVertical, Delete, Plus, Repeat } from "pixelarticons/react";
 
 interface ColorStudioDialogProps {
@@ -157,7 +158,7 @@ export const ColorStudioDialog = ({
         <div className="win95-titlebar">
           <span className="text-sm">Color Studio</span>
           <button className="border border-win95-light bg-card px-2 text-xs hover:bg-muted" onClick={onClose}>
-            <Delete className="h-3 w-3" />
+            <X className="h-3 w-3" />
           </button>
         </div>
 

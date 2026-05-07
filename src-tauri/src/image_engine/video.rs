@@ -691,6 +691,49 @@ fn apply_glitch(image: &mut ImageData, layer: &ResolvedLayer, _ctx: &FrameContex
     }
 }
 
+fn is_grayscale_like(image: &ImageData) -> bool {
+    if image.data.len() < 4 {
+        return true;
+    }
+
+    let mut total_channel_diff = 0u64;
+    let mut pixel_count = 0u64;
+
+    for idx in (0..image.data.len()).step_by(4) {
+        let r = image.data[idx] as i32;
+        let g = image.data[idx + 1] as i32;
+        let b = image.data[idx + 2] as i32;
+        let diff = (r - g).abs() + (r - b).abs() + (g - b).abs();
+        total_channel_diff += diff as u64;
+        pixel_count += 1;
+
+        // Early exit when the image is clearly not monochrome.
+        if total_channel_diff > pixel_count * 18 {
+            return false;
+        }
+    }
+
+    true
+}
+
+fn apply_palette_to_image(image: &mut ImageData, palette: &[[u8; 3]]) {
+    if palette.is_empty() {
+        return;
+    }
+
+    for idx in (0..image.data.len()).step_by(4) {
+        let [nr, ng, nb] = find_closest_color_oklab(
+            image.data[idx],
+            image.data[idx + 1],
+            image.data[idx + 2],
+            palette,
+        );
+        image.data[idx] = nr;
+        image.data[idx + 1] = ng;
+        image.data[idx + 2] = nb;
+    }
+}
+
 fn clamp_u8(value: f32) -> u8 {
     value.clamp(0.0, 255.0).round() as u8
 }
@@ -1312,6 +1355,7 @@ fn process_single_frame(
         let intensity = apply_temporal_variation(layer.intensity, temporal, &ctx, &layer.id);
         let original_width = image.width;
         let original_height = image.height;
+        let source_is_grayscale_like = is_grayscale_like(&image);
         let effect = AlgorithmRegistry::create(&layer.algorithm, layer.palette.clone(), intensity)?;
         let mut effected = image.clone();
 
@@ -1332,6 +1376,10 @@ fn process_single_frame(
 
         effect.apply(&mut effected, &ctx)?;
         apply_glitch(&mut effected, layer, &ctx);
+
+        if source_is_grayscale_like || is_grayscale_like(&effected) {
+            apply_palette_to_image(&mut effected, &layer.palette);
+        }
 
         if layer.pixel_size > 1 {
             effected = upscale_nearest(&effected, original_width, original_height);

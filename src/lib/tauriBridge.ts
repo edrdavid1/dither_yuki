@@ -55,6 +55,11 @@ export async function getBackendPreview(
   });
 }
 
+export async function readBytesFromPath(filePath: string): Promise<Uint8Array | null> {
+  const bytes = await safeTauriInvoke<number[]>("read_bytes_from_path", { filePath });
+  return bytes ? new Uint8Array(bytes) : null;
+}
+
 export async function exportSvgFrame(request: ExportSvgRequest): Promise<ExportSvgResponse | null> {
   return safeTauriInvoke<ExportSvgResponse>("export_svg", { request });
 }

@@ -50,6 +50,7 @@ export const PreviewPanel = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(1);
+  const hasManualZoomRef = useRef(false);
 
   const fitToWindow = useCallback(() => {
     const container = containerRef.current;
@@ -65,6 +66,18 @@ export const PreviewPanel = ({
     const nextZoom = Math.max(0.25, Math.min(4, Math.min(widthRatio, heightRatio, 1)));
     setZoom(Number.isFinite(nextZoom) ? nextZoom : 1);
   }, [originalImage, processedImage, showOriginal]);
+
+  useEffect(() => {
+    if (!originalImage && !processedImage) {
+      hasManualZoomRef.current = false;
+      setZoom(1);
+      return;
+    }
+
+    if (!hasManualZoomRef.current) {
+      fitToWindow();
+    }
+  }, [fitToWindow, originalImage, processedImage, showOriginal]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -91,10 +104,6 @@ export const PreviewPanel = ({
       ctx.fillText('No image loaded', canvas.width / 2, canvas.height / 2);
     }
   }, [originalImage, processedImage, showOriginal]);
-
-  useEffect(() => {
-    fitToWindow();
-  }, [fitToWindow]);
 
   useEffect(() => {
     const handleResize = () => fitToWindow();
@@ -195,7 +204,10 @@ export const PreviewPanel = ({
         <div className="flex gap-[1px]">
           <button 
             className="win95-button p-0.5 px-1.5"
-            onClick={() => setZoom(Math.max(0.25, zoom - 0.25))}
+            onClick={() => {
+              hasManualZoomRef.current = true;
+              setZoom(Math.max(0.25, zoom - 0.25));
+            }}
             title="Zoom Out"
           >
             <Minus className="h-3 w-3" />
@@ -203,14 +215,20 @@ export const PreviewPanel = ({
           <span className="win95-button p-0.5 px-2 text-[11px]">{Math.round(zoom * 100)}%</span>
           <button 
             className="win95-button p-0.5 px-1.5"
-            onClick={() => setZoom(Math.min(4, zoom + 0.25))}
+            onClick={() => {
+              hasManualZoomRef.current = true;
+              setZoom(Math.min(4, zoom + 0.25));
+            }}
             title="Zoom In"
           >
             <Plus className="h-3 w-3" />
           </button>
           <button 
             className="win95-button p-0.5 px-1.5"
-            onClick={fitToWindow}
+            onClick={() => {
+              hasManualZoomRef.current = false;
+              fitToWindow();
+            }}
             title="Fit to Window"
           >
             <Expand className="h-3 w-3" />

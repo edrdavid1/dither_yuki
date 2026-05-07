@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Globally shared asset registry: asset_id → absolute file path.
 #[derive(Debug, Default, Clone)]
@@ -16,6 +17,19 @@ pub struct ProjectState {
 }
 
 pub type SharedProjectState = Arc<Mutex<ProjectState>>;
+
+#[derive(Debug, Default)]
+pub struct DirtyState(pub AtomicBool);
+
+impl DirtyState {
+    pub fn set(&self, dirty: bool) {
+        self.0.store(dirty, Ordering::SeqCst);
+    }
+
+    pub fn is_dirty(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
+}
 
 pub fn new_shared_state() -> SharedProjectState {
     Arc::new(Mutex::new(ProjectState::default()))

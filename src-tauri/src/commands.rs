@@ -683,6 +683,16 @@ pub async fn save_bytes_to_path(file_path: String, bytes: Vec<u8>) -> Result<Str
     Ok(output.to_string_lossy().to_string())
 }
 
+#[tauri::command]
+pub async fn read_bytes_from_path(file_path: String) -> Result<Vec<u8>, String> {
+    let input = PathBuf::from(file_path.trim());
+    if input.as_os_str().is_empty() {
+        return Err("file_path cannot be empty".to_string());
+    }
+
+    fs::read(&input).map_err(|e| format!("Failed to read file {}: {e}", input.display()))
+}
+
 fn resolve_default_output_path(file_name: &str) -> Result<PathBuf, String> {
     let sanitized = file_name
         .trim()

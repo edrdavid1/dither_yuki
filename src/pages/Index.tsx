@@ -12,15 +12,25 @@ import { WorkspaceMain } from "@/components/WorkspaceMain";
 import { type WorkspaceMode } from "@/components/WorkspaceModeSwitcher";
 import { Dock } from "pixelarticons/react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { getPaletteColors, setCustomPalette, DitheringAlgorithm, ColorPalette } from "@/utils/dithering";
+import {
+  COLOR_PALETTES,
+  DITHERING_ALGORITHMS,
+  getPaletteColors,
+  normalizeColorPalette,
+  normalizeDitheringAlgorithm,
+  setCustomPalette,
+  type ColorPalette,
+  type DitheringAlgorithm,
+} from "@/utils/dithering";
 import { useImageWorker } from "@/hooks/useImageWorker";
 import { useEditorControlSync } from "@/hooks/useEditorControlSync";
 import { useLayerSession } from "@/hooks/useLayerSession";
 import { useFilmstripSession } from "@/hooks/useFilmstripSession";
 import { usePreviewOrchestration } from "@/hooks/usePreviewOrchestration";
-import { exportSvgFrame, saveSvgWithDialog, safeTauriInvoke, pickSaveProjectPath, pickOpenProjectPath } from "@/lib/tauriBridge";
+import { exportSvgFrame, readBytesFromPath, saveSvgWithDialog, safeTauriInvoke, pickSaveProjectPath, pickOpenProjectPath } from "@/lib/tauriBridge";
 import { useProjectStore } from "@/store/projectStore";
 import { decodeFilmstripProjectData, encodeFilmstripProjectData } from "@/lib/animation/filmstripPersistence";
+import { type FrameSettings } from "@/types/frameSettings";
 import {
   buildSiblingOutputPath,
   downloadBytes,
@@ -40,6 +50,9 @@ import {
   type Layer,
 } from "@/types/layers";
 import { toast } from "sonner";
+
+type SupportedAlgorithmName = (typeof DITHERING_ALGORITHMS)[number];
+type SupportedPaletteName = (typeof COLOR_PALETTES)[number];
 
 interface PresetSettings {
   algorithm: string;
@@ -144,60 +157,95 @@ interface VideoPreviewFrame {
 
 const makeFrameId = () => `frame-${Math.random().toString(36).slice(2, 10)}-${Date.now()}`;
 
-const imageToDataUrl = (image: HTMLImageElement) => {
-  const canvas = document.createElement("canvas");
-  canvas.width = image.width;
-  canvas.height = image.height;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
-    return "";
+const imageToFrameSrc = (image: HTMLImageElement) => image.currentSrc || image.src || "";
+
+const blobToDataUrl = async (blob: Blob): Promise<string> =>
+  await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(new Error("Failed to encode image blob"));
+    reader.readAsDataURL(blob);
+  });
+
+const sourceToDataUrl = async (src: string): Promise<string> => {
+  if (!src) return "";
+  if (src.startsWith("data:")) return src;
+
+  if (src.startsWith("blob:")) {
+    const response = await fetch(src);
+    if (!response.ok) {
+      throw new Error(`Failed to read blob source: ${response.status} ${response.statusText}`);
+    }
+    return blobToDataUrl(await response.blob());
   }
-  ctx.drawImage(image, 0, 0);
-  // JPEG is ~4× faster to encode than PNG; fine for preview thumbnails
-  return canvas.toDataURL("image/jpeg", 0.85);
+
+  const response = await fetch(src);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch image source: ${response.status} ${response.statusText}`);
+  }
+  return blobToDataUrl(await response.blob());
+};
+
+const loadImageFromBytes = (bytes: Uint8Array) =>
+  new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    const objectUrl = URL.createObjectURL(new Blob([bytes as unknown as BlobPart]));
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Failed to load image frame"));
+    };
+    image.src = objectUrl;
+  });
+
+const loadImageFromPath = async (filePath: string) => {
+  const bytes = await readBytesFromPath(filePath);
+  if (!bytes?.length) {
+    throw new Error(`Failed to read image bytes from ${filePath}`);
+  }
+  return loadImageFromBytes(bytes);
 };
 
 const loadImageFromSrc = (src: string) =>
   new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("Failed to load image frame"));
-    image.src = src;
+    const finalize = (resolvedSrc: string) => {
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error("Failed to load image frame"));
+      image.src = resolvedSrc;
+    };
+
+    if (!src || src.startsWith("data:") || src.startsWith("blob:")) {
+      finalize(src);
+      return;
+    }
+
+    void fetch(src)
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Failed to fetch image source: ${response.status} ${response.statusText}`);
+        }
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        image.onload = () => {
+          URL.revokeObjectURL(objectUrl);
+          resolve(image);
+        };
+        image.onerror = () => {
+          URL.revokeObjectURL(objectUrl);
+          reject(new Error("Failed to load image frame"));
+        };
+        image.src = objectUrl;
+      })
+      .catch((error) => {
+        // Fallback to the original source path if fetch is unavailable in this runtime.
+        console.warn("[image-load] blob fetch fallback failed, using direct src", error);
+        finalize(src);
+      });
   });
-
-const DITHERING_ALGORITHMS: DitheringAlgorithm[] = [
-  "None",
-  "Floyd-Steinberg",
-  "Jarvis-Judice-Ninke",
-  "Sierra",
-  "Atkinson",
-  "Ordered",
-  "Bayer 2x2",
-  "Bayer 4x4",
-  "Bayer 8x8",
-  "Random",
-];
-
-const COLOR_PALETTES: ColorPalette[] = [
-  "Grayscale",
-  "CGA",
-  "EGA",
-  "Gameboy",
-  "C64",
-  "ZX Spectrum",
-  "Apple II",
-  "Custom",
-];
-
-const BACKEND_TO_FRONTEND_PALETTE: Record<string, ColorPalette> = {
-  Grayscale: "Grayscale",
-  CGA: "CGA",
-  EGA: "EGA",
-  GameBoy: "Gameboy",
-  "ZX Spectrum": "ZX Spectrum",
-  "Commodore 64": "C64",
-  "Apple II": "Apple II",
-};
 
 // Keep preview close to source fidelity so inspector tuning matches final render.
 // 4K is a practical ceiling for interactive UI memory usage.
@@ -436,13 +484,25 @@ const saveExportedBytes = async (
   bytes: number[],
   mimeType?: string,
 ): Promise<string | null> => {
-  const savedPath = await safeTauriInvoke<string>("save_bytes_to_default_location", {
-    fileName,
-    bytes,
+  const fileExtension = fileName.split(".").pop()?.toLowerCase();
+  const selectedPath = await safeTauriInvoke<string | null>("plugin:dialog|save", {
+    options: {
+      title: "Save File",
+      defaultPath: fileName,
+      filters: fileExtension
+        ? [{ name: mimeType ?? fileExtension.toUpperCase(), extensions: [fileExtension] }]
+        : undefined,
+    },
   });
 
-  if (savedPath) {
-    return savedPath;
+  if (selectedPath) {
+    const savedPath = await safeTauriInvoke<string>("save_bytes_to_path", {
+      filePath: selectedPath,
+      bytes,
+    });
+    if (savedPath) {
+      return savedPath;
+    }
   }
 
   downloadBytes(bytes, fileName, mimeType);
@@ -535,6 +595,7 @@ const Index = () => {
   // ── Unified filmstrip state ────────────────────────────────────────────────
   const [frames, setFrames] = useState<AnimationFrame[]>([]);
   const [selectedFrameIndex, setSelectedFrameIndex] = useState(0);
+  const [playbackFrameIndex, setPlaybackFrameIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [animationPreviewFps, setAnimationPreviewFps] = useState(12);
   const [animationPreviewSpeed, setAnimationPreviewSpeed] = useState(1);
@@ -551,6 +612,9 @@ const Index = () => {
   const [workflowBusy, setWorkflowBusy] = useState(false);
   const [workflowStatus, setWorkflowStatus] = useState<string>();
   const [previewProcessing, setPreviewProcessing] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [showExitWarning, setShowExitWarning] = useState(false);
+  const [isSavingExitWarning, setIsSavingExitWarning] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
@@ -564,6 +628,9 @@ const Index = () => {
   const activeLayerIdRef = useRef(activeLayerId);
   activeLayerIdRef.current = activeLayerId;
   const { processImage } = useImageWorker();
+  const markProjectDirty = useCallback(() => {
+    setHasUnsavedChanges(true);
+  }, []);
 
   // Maximum dimension (px) used for live preview. High-res images are downscaled
   // to this limit before being sent to the backend, reducing IPC payload by up to
@@ -766,10 +833,10 @@ const Index = () => {
 
   useEffect(() => {
     const isSupportedAlgorithm = (value: string): value is DitheringAlgorithm =>
-      DITHERING_ALGORITHMS.includes(value as DitheringAlgorithm);
+      DITHERING_ALGORITHMS.includes(value as SupportedAlgorithmName);
 
     const isSupportedPalette = (value: string): value is ColorPalette =>
-      COLOR_PALETTES.includes(value as ColorPalette);
+      COLOR_PALETTES.includes(value as SupportedPaletteName);
 
     const loadBackendCatalog = async () => {
       const [backendAlgorithms, backendPalettes, patternAlgorithms, temporalModeList, easingModeList, parameterModeList] = await Promise.all([
@@ -787,7 +854,9 @@ const Index = () => {
       }
 
       if (backendAlgorithms) {
-        const supported = backendAlgorithms.filter(isSupportedAlgorithm);
+        const supported = backendAlgorithms
+          .map(normalizeDitheringAlgorithm)
+          .filter(isSupportedAlgorithm);
         if (supported.length > 0) {
           setAlgorithmOptions(supported);
         }
@@ -795,8 +864,8 @@ const Index = () => {
 
       if (backendPalettes) {
         const supported = backendPalettes
-          .map((paletteName) => BACKEND_TO_FRONTEND_PALETTE[paletteName] ?? null)
-          .filter((value): value is ColorPalette => value !== null && isSupportedPalette(value));
+          .map(normalizeColorPalette)
+          .filter((value): value is ColorPalette => isSupportedPalette(value));
         const merged = Array.from(new Set<ColorPalette>([...supported, "Custom"]));
         if (merged.length > 0) {
           setPaletteOptions(merged);
@@ -808,7 +877,6 @@ const Index = () => {
       }
 
       setBackendConnected(true);
-      setStatus((prev) => (prev === "Ready" ? "Backend catalog synced" : prev));
     };
 
     void loadBackendCatalog();
@@ -980,6 +1048,28 @@ const Index = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [quantizationColorCount, quantizationMethod]);
 
+  useEffect(() => {
+    const handleWindowDragOver = (event: DragEvent) => {
+      if (!event.dataTransfer?.types.includes("Files")) return;
+      event.preventDefault();
+    };
+
+    const handleWindowDrop = (event: DragEvent) => {
+      const file = event.dataTransfer?.files?.[0];
+      if (!file) return;
+      event.preventDefault();
+      handleFile(file);
+    };
+
+    window.addEventListener("dragover", handleWindowDragOver);
+    window.addEventListener("drop", handleWindowDrop);
+
+    return () => {
+      window.removeEventListener("dragover", handleWindowDragOver);
+      window.removeEventListener("drop", handleWindowDrop);
+    };
+  }, [handleFile]);
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1076,6 +1166,7 @@ const Index = () => {
     )));
     if (targetFrame) {
       void renderFramePreview(targetFrame.id, snapshot);
+      markProjectDirty();
     }
   }, [selectedFrameIndex]);
 
@@ -1115,6 +1206,7 @@ const Index = () => {
 
     setLayers(next);
     persistCurrentLayersToFrame(next, currentLayerId);
+    markProjectDirty();
     return next;
   }, [captureEffectParams, persistCurrentLayersToFrame]);
 
@@ -1129,7 +1221,10 @@ const Index = () => {
   } = useLayerSession({
     layersRef,
     activeLayerIdRef,
-    setLayers,
+    setLayers: (value) => {
+      setLayers(value);
+      markProjectDirty();
+    },
     setActiveLayerId,
     commitControlsToActiveEffect,
     applyLayerSnapshotToControls,
@@ -1142,6 +1237,7 @@ const Index = () => {
     frameId: string,
     snapshotLayers?: Layer[],
     sourceImage?: HTMLImageElement | null,
+    forceProcessedImage = false,
   ): Promise<string | null> => {
     const frame = framesRef.current.find((item) => item.id === frameId) ?? null;
     if (!frame) return null;
@@ -1168,7 +1264,7 @@ const Index = () => {
           : item
       )));
 
-      if (framesRef.current[selectedFrameIndex]?.id === frameId) {
+      if (forceProcessedImage || framesRef.current[selectedFrameIndex]?.id === frameId) {
         setProcessedImage(previewImage);
       }
 
@@ -1196,10 +1292,16 @@ const Index = () => {
     selectedFrameIndex,
     selectedFrameIds,
     frames,
-    setFrames,
+    setFrames: (value) => {
+      setFrames(value);
+      markProjectDirty();
+    },
     setSelectedFrameIndex,
     setSelectedFrameIds,
-    setLayers,
+    setLayers: (value) => {
+      setLayers(value);
+      markProjectDirty();
+    },
     setActiveLayerId,
     setIsPlaying,
     setShowOriginal,
@@ -1293,11 +1395,12 @@ const Index = () => {
     setIsPlaying((prev) => {
       const next = !prev;
       if (next) {
+        setPlaybackFrameIndex(selectedFrameIndex);
         setShowOriginal(false);
       }
       return next;
     });
-  }, [frames.length, workspaceMode]);
+  }, [frames.length, selectedFrameIndex, workspaceMode]);
 
   /** Save current settings to this frame and mark it as a keyframe. */
   const handleApplyEffectToSelectedFrame = useCallback(() => {
@@ -1316,6 +1419,7 @@ const Index = () => {
     );
     setStatus(`Layer snapshot saved to frame ${selectedFrameIndex + 1} (keyframe)`);
     toast.success(`Frame ${selectedFrameIndex + 1} marked as keyframe`);
+    markProjectDirty();
   }, [commitControlsToActiveEffect, selectedFrameIndex]);
 
   /**
@@ -1585,39 +1689,66 @@ const Index = () => {
     if (!originalImage) return;
     if (frames.length > 0) return; // already has frames
 
-    const src = imageToDataUrl(originalImage);
-    if (!src) return;
-    const snapshotLayers = commitControlsToActiveEffect() ?? cloneLayers(layersRef.current);
-    const initialFrame = makeAnimationFrame({
-      id: makeFrameId(),
-      src,
-      width: originalImage.width,
-      height: originalImage.height,
-      layers: snapshotLayers,
-      activeLayerId: activeLayerIdRef.current,
-      isKeyframe: true,
+    let cancelled = false;
+    void (async () => {
+      const src = await sourceToDataUrl(imageToFrameSrc(originalImage));
+      if (!src || cancelled) return;
+      const snapshotLayers = commitControlsToActiveEffect() ?? cloneLayers(layersRef.current);
+      const initialFrame = makeAnimationFrame({
+        id: makeFrameId(),
+        src,
+        width: originalImage.width,
+        height: originalImage.height,
+        layers: snapshotLayers,
+        activeLayerId: activeLayerIdRef.current,
+        isKeyframe: true,
+      });
+      setFrames([initialFrame]);
+      setSelectedFrameIndex(0);
+      setSelectedFrameIds(new Set([initialFrame.id]));
+    })().catch((error) => {
+      console.error("Failed to create initial animation frame", error);
     });
-    setFrames([initialFrame]);
-    setSelectedFrameIndex(0);
-    setSelectedFrameIds(new Set([initialFrame.id]));
+    return () => {
+      cancelled = true;
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [commitControlsToActiveEffect, workspaceMode, originalImage]);
 
   // ── Load selected frame + its layer snapshot into the preview ────────────
   useEffect(() => {
     if (workspaceMode !== "animation") return;
-    const frame = framesRef.current[selectedFrameIndex];
-    if (!frame) return;
 
-    setLayers(cloneLayers(frame.layers));
-    setActiveLayerId(frame.activeLayerId ?? frame.layers[0]?.id ?? "");
-    const snapshotLayer = frame.layers.find((layer) => layer.id === (frame.activeLayerId ?? frame.layers[0]?.id)) ?? frame.layers[0] ?? null;
-    applyLayerSnapshotToControls(snapshotLayer);
+    const frameIndex = isPlaying ? playbackFrameIndex : selectedFrameIndex;
+    const frame = framesRef.current[frameIndex];
+    if (!frame) return;
 
     void loadImageFromSrc(frame.src)
       .then((image) => {
         setOriginalImage(image);
         setImageSize(`${image.width}×${image.height}`);
+
+        if (isPlaying) {
+          if (frame.previewDataUrl) {
+            void loadImageFromSrc(frame.previewDataUrl)
+              .then((preview) => {
+                setProcessedImage(preview);
+              })
+              .catch((error) => {
+                console.error("Failed to load cached frame preview", error);
+                void renderFramePreview(frame.id, frame.layers, image, true);
+              });
+          } else {
+            void renderFramePreview(frame.id, frame.layers, image, true);
+          }
+          return;
+        }
+
+        setLayers(cloneLayers(frame.layers));
+        setActiveLayerId(frame.activeLayerId ?? frame.layers[0]?.id ?? "");
+        const snapshotLayer = frame.layers.find((layer) => layer.id === (frame.activeLayerId ?? frame.layers[0]?.id)) ?? frame.layers[0] ?? null;
+        applyLayerSnapshotToControls(snapshotLayer);
+
         if (frame.previewDataUrl) {
           void loadImageFromSrc(frame.previewDataUrl)
             .then((preview) => {
@@ -1634,14 +1765,14 @@ const Index = () => {
       .catch((error) => {
         console.error("Failed to load selected animation frame", error);
       });
-  }, [applyLayerSnapshotToControls, renderFramePreview, selectedFrameIndex, workspaceMode]);
+  }, [applyLayerSnapshotToControls, isPlaying, playbackFrameIndex, renderFramePreview, selectedFrameIndex, workspaceMode]);
 
   // ── Unified play loop — cycles selectedFrameIndex at animationPreviewFps ──
   useEffect(() => {
     if (!isPlaying || frames.length <= 1) return;
 
     const timer = window.setInterval(() => {
-      setSelectedFrameIndex((prev) => (prev + 1) % frames.length);
+      setPlaybackFrameIndex((prev) => (prev + 1) % frames.length);
     }, playbackIntervalMs);
 
     return () => window.clearInterval(timer);
@@ -1661,6 +1792,7 @@ const Index = () => {
     setSharpness(0);
     setNoise(0);
     setStatus("Ready");
+    setHasUnsavedChanges(true);
   }, []);
 
   // Save current processed image as PNG (was the old "Save")
@@ -1695,7 +1827,36 @@ const Index = () => {
   const updateManifest = useProjectStore((s) => s.updateManifest);
   const projectManifest = useProjectStore((s) => s.manifest);
 
-  const handleSaveProject = useCallback(async () => {
+  const handleNewProject = useCallback(() => {
+    newProject("Untitled Project");
+    const defaultLayer = createDefaultLayer("Layer 1");
+    setSourceImageFile(null);
+    setVideoSource(null);
+    setVideoMetadata(null);
+    setVideoPreviewFrames([]);
+    setSelectedVideoPreviewFrame(0);
+    setOriginalImage(null);
+    setProcessedImage(null);
+    setShowOriginal(true);
+    setFrames([]);
+    setSelectedFrameIndex(0);
+    setPlaybackFrameIndex(0);
+    setSelectedFrameIds(new Set());
+    setLayers([defaultLayer]);
+    setActiveLayerId(defaultLayer.id);
+    applyEffectParams(DEFAULT_FRAME_SETTINGS);
+    setWorkspaceMode("image");
+    setStatus("New project created");
+    setWorkflowStatus(undefined);
+    setJobId(null);
+    setJobKind(null);
+    setJobProgress(null);
+    setJobOutputPath(null);
+    setWorkflowBusy(false);
+    setHasUnsavedChanges(true);
+  }, [applyEffectParams, newProject]);
+
+  const handleSaveProject = useCallback(async (): Promise<boolean> => {
     try {
       const committedLayers = commitControlsToActiveEffect() ?? cloneLayers(layersRef.current);
       const framesForSave = framesRef.current.map((frame, index) => (
@@ -1726,9 +1887,10 @@ const Index = () => {
       // Persist currently loaded source image as a manifest asset (for project reopen).
       // Works both for real files (native path exists) and in-memory images (canvas fallback).
       if (originalImage) {
-        const nativeImagePath = getNativeFilePath(sourceImageFile);
+        const existingImageAsset = useProjectStore.getState().manifest?.assets.find((a) => a.assetType === "image" && !a.offline);
+        const nativeImagePath = getNativeFilePath(sourceImageFile) ?? existingImageAsset?.originalPath ?? null;
         let stagedPath: string | null = nativeImagePath;
-        let storageMode: "external" | "embedded" = nativeImagePath ? "external" : "embedded";
+        let storageMode: "external" | "embedded" = nativeImagePath ? (sourceImageFile ? "external" : "embedded") : "embedded";
         let imageBytes: number[] | null = null;
         const imageName = sourceImageFile?.name ?? "source-image.png";
 
@@ -1771,9 +1933,19 @@ const Index = () => {
           const imageAssetId = existingImageAsset?.id ?? `image-${crypto.randomUUID()}`;
           const imageSize = sourceImageFile?.size ?? imageBytes?.length ?? existingImageAsset?.sizeBytes ?? 0;
           const filtered = m.assets.filter((a) => a.id !== imageAssetId && a.assetType !== "image");
+          const customPaletteColors = customColors
+            .map(hexToRgb)
+            .filter((color): color is [number, number, number] => color !== null);
 
           return {
             ...m,
+            palettes: palette === "Custom" && customPaletteColors.length > 0
+              ? [{
+                  id: "custom-palette",
+                  name: "Custom",
+                  colors: customPaletteColors,
+                }]
+              : [],
             assets: [
               {
                 id: imageAssetId,
@@ -1800,7 +1972,7 @@ const Index = () => {
       );
       if (!path) {
         // User cancelled the dialog
-        return;
+        return false;
       }
       const normalizedPath = path.toLowerCase().endsWith(".dyproj") ? path : `${path}.dyproj`;
       const saveResult = await useProjectStore.getState().saveProject(normalizedPath, timelineData);
@@ -1809,11 +1981,72 @@ const Index = () => {
       }
       toast.success(`Project saved: ${normalizedPath.split("/").pop()}`);
       setStatus("Project saved");
+      setHasUnsavedChanges(false);
+      return true;
     } catch (err) {
       console.error("Save project failed", err);
       toast.error(`Failed to save project: ${err instanceof Error ? err.message : String(err)}`);
+      return false;
     }
   }, [activeLayerIdRef, commitControlsToActiveEffect, framesRef, layersRef, newProject, originalImage, projectManifest, selectedFrameIds, selectedFrameIndex, sourceImageFile, updateManifest]);
+
+  useEffect(() => {
+    if (!backendConnected) {
+      return;
+    }
+
+    console.log("[exit-debug] syncing dirty state to Rust:", hasUnsavedChanges);
+    void safeTauriInvoke("set_project_dirty", { dirty: hasUnsavedChanges });
+
+    let unlisten: (() => void) | undefined;
+
+    const setupExitListener = async () => {
+      const { listen } = await import("@tauri-apps/api/event");
+      unlisten = await listen("app-exit-requested", async () => {
+        console.log("[exit-debug] app-exit-requested received; dirty=", hasUnsavedChanges);
+        if (!hasUnsavedChanges) {
+          console.log("[exit-debug] no unsaved changes; exiting immediately");
+          await safeTauriInvoke("exit_app", {});
+          return;
+        }
+
+        console.log("[exit-debug] unsaved changes present; showing warning dialog");
+        setShowExitWarning(true);
+      });
+    };
+
+    void setupExitListener();
+
+    return () => {
+      void unlisten?.();
+    };
+  }, [backendConnected, hasUnsavedChanges, handleSaveProject]);
+
+  const handleSaveAndExit = useCallback(async () => {
+    setIsSavingExitWarning(true);
+    try {
+      const saved = await handleSaveProject();
+      if (saved) {
+        setShowExitWarning(false);
+        setHasUnsavedChanges(false);
+        console.log("[exit-debug] saved via exit dialog; exiting app");
+        await safeTauriInvoke("exit_app", {});
+      }
+    } finally {
+      setIsSavingExitWarning(false);
+    }
+  }, [handleSaveProject, hasUnsavedChanges]);
+
+  const handleDiscardAndExit = useCallback(async () => {
+    setShowExitWarning(false);
+    setHasUnsavedChanges(false);
+    console.log("[exit-debug] discard clicked; exiting app");
+    await safeTauriInvoke("exit_app", {});
+  }, []);
+
+  const handleCancelExitWarning = useCallback(() => {
+    setShowExitWarning(false);
+  }, []);
 
   const handleOpenProject = useCallback(async () => {
     try {
@@ -1824,50 +2057,84 @@ const Index = () => {
       if (result.offlineAssets.length) {
         toast.warning(`${result.offlineAssets.length} asset(s) could not be relinked`);
       }
+      setHasUnsavedChanges(false);
 
       const loadedManifest = useProjectStore.getState().manifest;
       const imageAsset = loadedManifest?.assets.find((a) => a.assetType === "image" && !a.offline)
         ?? loadedManifest?.assets.find((a) => !a.offline && /\.(png|jpe?g|gif|webp|bmp)$/i.test(a.name));
       const filmstrip = decodeFilmstripProjectData(result.timelineData);
-      if (imageAsset) {
-        let assetSrc = `dyproj://localhost/asset/${encodeURIComponent(imageAsset.id)}`;
-        if (imageAsset.originalPath) {
-          try {
-            const { convertFileSrc } = await import("@tauri-apps/api/core");
-            assetSrc = convertFileSrc(imageAsset.originalPath);
-          } catch {
-            // Keep dyproj fallback URL.
-          }
+      const savedCustomPalette = loadedManifest?.palettes?.find((entry) => entry.name === "Custom" || entry.id === "custom-palette")?.colors?.length
+        ? loadedManifest.palettes.find((entry) => entry.name === "Custom" || entry.id === "custom-palette")?.colors.map(([r, g, b]) => rgbToHex([r, g, b]))
+        : null;
+
+      if (savedCustomPalette?.length) {
+        setCustomColors(savedCustomPalette);
+        setCustomPalette(savedCustomPalette);
+        setPaletteOptions((prev) => (prev.includes("Custom") ? prev : [...prev, "Custom"]));
+      }
+
+      const hydrateFilmstripSelection = (filmstripData: ReturnType<typeof decodeFilmstripProjectData>) => {
+        if (!filmstripData?.frames.length) {
+          return false;
         }
+
+        const selectedIndex = Math.max(0, Math.min(filmstripData.selectedFrameIndex, filmstripData.frames.length - 1));
+        const selectedFrame = filmstripData.frames[selectedIndex] ?? filmstripData.frames[0];
+        const selectedFrameId = selectedFrame?.id;
+        const selectedLayerId = selectedFrame?.activeLayerId ?? selectedFrame?.layers[0]?.id ?? "";
+        const selectedLayer = selectedFrame?.layers.find((layer) => layer.id === selectedLayerId) ?? selectedFrame?.layers[0] ?? null;
+
+        setFrames(filmstripData.frames);
+        setSelectedFrameIndex(selectedIndex);
+        setSelectedFrameIds(new Set(filmstripData.selectedFrameIds.length ? filmstripData.selectedFrameIds : selectedFrameId ? [selectedFrameId] : []));
+        setLayers(selectedFrame ? cloneLayers(selectedFrame.layers) : [createDefaultLayer("Layer 1")]);
+        setActiveLayerId(selectedLayerId);
+        applyLayerSnapshotToControls(selectedLayer);
+        setWorkspaceMode("animation");
+        setStatus("Project loaded with filmstrip");
+        return true;
+      };
+
+      if (imageAsset) {
         try {
-          const restored = await loadImageFromSrc(assetSrc);
+          const restored = imageAsset.originalPath
+            ? await loadImageFromPath(imageAsset.originalPath)
+            : null;
+          if (!restored) {
+            throw new Error("No valid source image path available");
+          }
           setOriginalImage(restored);
           setProcessedImage(null);
           setShowOriginal(true);
           setImageSize(`${restored.width}×${restored.height}`);
-          if (filmstrip?.frames.length) {
-            setFrames(filmstrip.frames);
-            setSelectedFrameIndex(filmstrip.selectedFrameIndex);
-            setSelectedFrameIds(new Set(filmstrip.selectedFrameIds.length ? filmstrip.selectedFrameIds : [filmstrip.frames[filmstrip.selectedFrameIndex]?.id ?? filmstrip.frames[0]?.id].filter(Boolean) as string[]));
-            setWorkspaceMode("animation");
-            setStatus("Project loaded with filmstrip");
-          } else {
+          if (!hydrateFilmstripSelection(filmstrip)) {
             setWorkspaceMode("image");
             setStatus("Project loaded");
           }
         } catch (imageErr) {
-          console.error("Project opened, but image restore failed", imageErr);
+          if (imageAsset.originalPath) {
+            try {
+              const restored = await loadImageFromPath(imageAsset.originalPath);
+              setOriginalImage(restored);
+              setProcessedImage(null);
+              setShowOriginal(true);
+              setImageSize(`${restored.width}×${restored.height}`);
+              if (!hydrateFilmstripSelection(filmstrip)) {
+                setWorkspaceMode("image");
+                setStatus("Project loaded");
+              }
+              return;
+            } catch (fallbackErr) {
+              console.error("Project opened, but image restore failed", imageErr, fallbackErr);
+            }
+          } else {
+            console.error("Project opened, but image restore failed", imageErr);
+          }
           toast.warning("Project opened, but source image could not be restored");
           setStatus("Project loaded (image unavailable)");
         }
       } else {
-        if (filmstrip?.frames.length) {
-          setFrames(filmstrip.frames);
-          setSelectedFrameIndex(filmstrip.selectedFrameIndex);
-          setSelectedFrameIds(new Set(filmstrip.selectedFrameIds.length ? filmstrip.selectedFrameIds : [filmstrip.frames[filmstrip.selectedFrameIndex]?.id ?? filmstrip.frames[0]?.id].filter(Boolean) as string[]));
-          setWorkspaceMode("animation");
-          setStatus("Project loaded with filmstrip");
-        } else {
+        if (!hydrateFilmstripSelection(filmstrip)) {
           setStatus("Project loaded (no source image asset)");
         }
       }
@@ -1984,12 +2251,14 @@ const Index = () => {
   }, [originalImage, processedImage]);
 
   const handleLoadPreset = (preset: PresetPayload) => {
-    const nextAlgorithm = DITHERING_ALGORITHMS.includes(preset.settings.algorithm as DitheringAlgorithm)
-      ? (preset.settings.algorithm as DitheringAlgorithm)
+    const normalizedAlgorithm = normalizeDitheringAlgorithm(preset.settings.algorithm);
+    const nextAlgorithm = DITHERING_ALGORITHMS.includes(normalizedAlgorithm as SupportedAlgorithmName)
+      ? (normalizedAlgorithm as DitheringAlgorithm)
       : "Floyd-Steinberg";
 
-    const nextPalette = COLOR_PALETTES.includes(preset.settings.palette as ColorPalette)
-      ? (preset.settings.palette as ColorPalette)
+    const normalizedPalette = normalizeColorPalette(preset.settings.palette);
+    const nextPalette = COLOR_PALETTES.includes(normalizedPalette as SupportedPaletteName)
+      ? (normalizedPalette as ColorPalette)
       : "Grayscale";
 
     setAlgorithm(nextAlgorithm);
@@ -2002,6 +2271,7 @@ const Index = () => {
     setBlur(preset.settings.blur);
     setSharpness(preset.settings.sharpness);
     setNoise(preset.settings.noise);
+    setHasUnsavedChanges(true);
   };
 
   const handleExportPatternPreset = useCallback(async () => {
@@ -2086,8 +2356,9 @@ const Index = () => {
   }, [algorithm, blur, brightness, contrast, customColors, intensity, noise, palette, pixelSize, saturation, sharpness, shareablePatternAlgorithms, workspaceMode]);
 
   const applyImportedPatternPreset = useCallback((preset: PatternPresetPayload) => {
-    const nextAlgorithm = DITHERING_ALGORITHMS.includes(preset.algorithm as DitheringAlgorithm)
-      ? (preset.algorithm as DitheringAlgorithm)
+    const normalizedAlgorithm = normalizeDitheringAlgorithm(preset.algorithm);
+    const nextAlgorithm = DITHERING_ALGORITHMS.includes(normalizedAlgorithm as SupportedAlgorithmName)
+      ? (normalizedAlgorithm as DitheringAlgorithm)
       : null;
 
     if (!nextAlgorithm) {
@@ -2095,8 +2366,15 @@ const Index = () => {
       return;
     }
 
-    setAlgorithm(nextAlgorithm);
-    setIntensity(Math.max(1, Math.min(100, Number(preset.intensity) || 100)));
+    const currentSnapshot = captureEffectParams();
+    const importedSnapshot = {
+      ...currentSnapshot,
+      ...(typeof preset.params === "object" && preset.params !== null ? (preset.params as Partial<FrameSettings>) : {}),
+      algorithm: nextAlgorithm,
+      intensity: Math.max(1, Math.min(100, Number(preset.intensity) || 100)),
+    } satisfies Partial<FrameSettings>;
+
+    applyEffectParams(importedSnapshot);
 
     if (Array.isArray(preset.palette) && preset.palette.length > 0) {
       const importedHex = preset.palette.map(rgbToHex);
@@ -2105,9 +2383,13 @@ const Index = () => {
       setPalette("Custom");
     }
 
+    setAlgorithm(nextAlgorithm);
+    setIntensity(Math.max(1, Math.min(100, Number(preset.intensity) || 100)));
+
     setStatus(`Preset loaded: ${preset.name}`);
     toast.success(`Imported preset: ${preset.name}`);
-  }, []);
+    setHasUnsavedChanges(true);
+  }, [applyEffectParams, captureEffectParams]);
 
   const handleImportPatternPreset = useCallback(() => {
     presetImportInputRef.current?.click();
@@ -2146,6 +2428,7 @@ const Index = () => {
     setCustomPalette(colors);
     setPalette("Custom");
     setShowColorStudio(false);
+    setHasUnsavedChanges(true);
   };
 
   const handlePaletteReorder = useCallback((fromIndex: number, toIndex: number) => {
@@ -2161,6 +2444,7 @@ const Index = () => {
       const [moved] = next.splice(fromIndex, 1);
       next.splice(toIndex, 0, moved);
       setCustomPalette(next);
+      setHasUnsavedChanges(true);
       return next;
     });
   }, [palette]);
@@ -2183,6 +2467,7 @@ const Index = () => {
       const next = [...prev];
       next[index] = normalized.toUpperCase();
       setCustomPalette(next);
+      setHasUnsavedChanges(true);
       return next;
     });
   }, [palette]);
@@ -2246,6 +2531,117 @@ const Index = () => {
     return () => window.removeEventListener('keydown', handler);
   }, [handleDeleteSelectedFrame, handleExport, handleExportImage, handleOpenFile, handleOpenProject, handleRedo, handleReset, handleSaveProject, handleUndo, workspaceMode]);
 
+  useEffect(() => {
+    const handler = (event: BeforeUnloadEvent) => {
+      const state = useProjectStore.getState();
+      if (!state.manifest || !state.isDirty()) {
+        return;
+      }
+
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, []);
+  useEffect(() => {
+    if (!backendConnected) {
+      return;
+    }
+
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+
+    const setupMenuListener = async () => {
+      const { listen } = await import("@tauri-apps/api/event");
+      const stop = await listen<string>("menu-action", ({ payload }) => {
+        switch (payload) {
+          case "quit":
+            if (!hasUnsavedChanges) {
+              void safeTauriInvoke("exit_app", {});
+              break;
+            }
+            setShowExitWarning(true);
+            break;
+          case "new-project":
+            handleNewProject();
+            break;
+          case "open-file":
+            handleOpenFile();
+            break;
+          case "open-project":
+            void handleOpenProject();
+            break;
+          case "save-project":
+            void handleSaveProject();
+            break;
+          case "export-image":
+            handleExportImage();
+            break;
+          case "export":
+            handleExport();
+            break;
+          case "export-svg":
+            void handleExportSvg();
+            break;
+          case "undo":
+            handleUndo();
+            break;
+          case "redo":
+            handleRedo();
+            break;
+          case "reset":
+            handleReset();
+            break;
+          case "save-preset":
+          case "load-preset":
+          case "manage-presets":
+            setShowPresetManager(true);
+            break;
+          case "export-preset":
+            void handleExportPatternPreset();
+            break;
+          case "import-preset":
+            handleImportPatternPreset();
+            break;
+          case "shortcuts":
+            setShowShortcuts(true);
+            break;
+        }
+      });
+
+      if (cancelled) {
+        await stop();
+        return;
+      }
+
+      unlisten = stop;
+    };
+
+    void setupMenuListener();
+
+    return () => {
+      cancelled = true;
+      void unlisten?.();
+    };
+  }, [
+    backendConnected,
+    handleExport,
+    handleExportImage,
+    handleExportPatternPreset,
+    handleExportSvg,
+    handleImportPatternPreset,
+    handleNewProject,
+    handleOpenFile,
+    handleOpenProject,
+    handleRedo,
+    handleReset,
+    handleSaveProject,
+    handleUndo,
+    hasUnsavedChanges,
+  ]);
+
   // Frames that are keyframes — shown with a blue dot in the filmstrip.
   const keyframeIndices = useMemo(() => {
     const s = new Set<number>();
@@ -2283,6 +2679,7 @@ const Index = () => {
 
         {!focusMode && (
           <MenuBar
+            onNewProject={handleNewProject}
             onOpenFile={handleOpenFile}
             onOpenProject={handleOpenProject}
             onSaveImage={handleExportImage}
@@ -2371,95 +2768,218 @@ const Index = () => {
             {!focusMode && (
               <aside className="min-h-0 overflow-hidden">
                 <div className="flex h-full min-h-0 flex-col gap-2 overflow-hidden">
-                  <InspectorWindow title="Inspector" subtitle="inspector">
+                  <InspectorWindow title="Inspector" subtitle="controls">
                     <ControlPanel
                       algorithm={algorithm}
                       algorithmOptions={algorithmOptions}
-                      setAlgorithm={(v: string) => setAlgorithm(v as DitheringAlgorithm)}
+                      setAlgorithm={(v: string) => {
+                        setAlgorithm(v as DitheringAlgorithm);
+                        markProjectDirty();
+                      }}
                       palette={palette}
                       paletteOptions={paletteOptions}
-                      setPalette={(v: string) => setPalette(v as ColorPalette)}
+                      setPalette={(v: string) => {
+                        setPalette(v as ColorPalette);
+                        markProjectDirty();
+                      }}
                       intensity={intensity}
-                      setIntensity={setIntensity}
+                      setIntensity={(value) => {
+                        setIntensity(value);
+                        markProjectDirty();
+                      }}
                       contrast={contrast}
-                      setContrast={setContrast}
+                      setContrast={(value) => {
+                        setContrast(value);
+                        markProjectDirty();
+                      }}
                       brightness={brightness}
-                      setBrightness={setBrightness}
+                      setBrightness={(value) => {
+                        setBrightness(value);
+                        markProjectDirty();
+                      }}
                       saturation={saturation}
-                      setSaturation={setSaturation}
+                      setSaturation={(value) => {
+                        setSaturation(value);
+                        markProjectDirty();
+                      }}
                       pixelSize={pixelSize}
-                      setPixelSize={setPixelSize}
+                      setPixelSize={(value) => {
+                        setPixelSize(value);
+                        markProjectDirty();
+                      }}
                       blur={blur}
-                      setBlur={setBlur}
+                      setBlur={(value) => {
+                        setBlur(value);
+                        markProjectDirty();
+                      }}
                       sharpness={sharpness}
-                      setSharpness={setSharpness}
+                      setSharpness={(value) => {
+                        setSharpness(value);
+                        markProjectDirty();
+                      }}
                       noise={noise}
-                      setNoise={setNoise}
+                      setNoise={(value) => {
+                        setNoise(value);
+                        markProjectDirty();
+                      }}
                       blendMode={blendMode}
-                      setBlendMode={setBlendMode}
+                      setBlendMode={(value) => {
+                        setBlendMode(value);
+                        markProjectDirty();
+                      }}
                       layerOpacity={layerOpacity}
-                      setLayerOpacity={setLayerOpacity}
+                      setLayerOpacity={(value) => {
+                        setLayerOpacity(value);
+                        markProjectDirty();
+                      }}
                       paletteSwatches={paletteSwatches}
                       onPaletteReorder={handlePaletteReorder}
                       onPaletteColorEdit={handlePaletteColorEdit}
                       snapGlitchToPalette={snapGlitchToPalette}
-                      setSnapGlitchToPalette={setSnapGlitchToPalette}
+                      setSnapGlitchToPalette={(value) => {
+                        setSnapGlitchToPalette(value);
+                        markProjectDirty();
+                      }}
                       paletteMix={paletteMix}
-                      setPaletteMix={setPaletteMix}
+                      setPaletteMix={(value) => {
+                        setPaletteMix(value);
+                        markProjectDirty();
+                      }}
                       globalSeed={globalSeed}
-                      setGlobalSeed={setGlobalSeed}
+                      setGlobalSeed={(value) => {
+                        setGlobalSeed(value);
+                        markProjectDirty();
+                      }}
                       glitchType={glitchType}
-                      setGlitchType={setGlitchType}
+                      setGlitchType={(value) => {
+                        setGlitchType(value);
+                        markProjectDirty();
+                      }}
                       pixelSortMetric={pixelSortMetric}
-                      setPixelSortMetric={setPixelSortMetric}
+                      setPixelSortMetric={(value) => {
+                        setPixelSortMetric(value);
+                        markProjectDirty();
+                      }}
                       pixelSortMask={pixelSortMask}
-                      setPixelSortMask={setPixelSortMask}
+                      setPixelSortMask={(value) => {
+                        setPixelSortMask(value);
+                        markProjectDirty();
+                      }}
                       thresholdMin={thresholdMin}
-                      setThresholdMin={setThresholdMin}
+                      setThresholdMin={(value) => {
+                        setThresholdMin(value);
+                        markProjectDirty();
+                      }}
                       thresholdMax={thresholdMax}
-                      setThresholdMax={setThresholdMax}
+                      setThresholdMax={(value) => {
+                        setThresholdMax(value);
+                        markProjectDirty();
+                      }}
                       angle={angle}
-                      setAngle={setAngle}
+                      setAngle={(value) => {
+                        setAngle(value);
+                        markProjectDirty();
+                      }}
                       sortLength={sortLength}
-                      setSortLength={setSortLength}
+                      setSortLength={(value) => {
+                        setSortLength(value);
+                        markProjectDirty();
+                      }}
                       blockSize={blockSize}
-                      setBlockSize={setBlockSize}
+                      setBlockSize={(value) => {
+                        setBlockSize(value);
+                        markProjectDirty();
+                      }}
                       chaos={chaos}
-                      setChaos={setChaos}
+                      setChaos={(value) => {
+                        setChaos(value);
+                        markProjectDirty();
+                      }}
                       quantization={quantization}
-                      setQuantization={setQuantization}
+                      setQuantization={(value) => {
+                        setQuantization(value);
+                        markProjectDirty();
+                      }}
                       redShiftX={redShiftX}
-                      setRedShiftX={setRedShiftX}
+                      setRedShiftX={(value) => {
+                        setRedShiftX(value);
+                        markProjectDirty();
+                      }}
                       redShiftY={redShiftY}
-                      setRedShiftY={setRedShiftY}
+                      setRedShiftY={(value) => {
+                        setRedShiftY(value);
+                        markProjectDirty();
+                      }}
                       greenShiftX={greenShiftX}
-                      setGreenShiftX={setGreenShiftX}
+                      setGreenShiftX={(value) => {
+                        setGreenShiftX(value);
+                        markProjectDirty();
+                      }}
                       greenShiftY={greenShiftY}
-                      setGreenShiftY={setGreenShiftY}
+                      setGreenShiftY={(value) => {
+                        setGreenShiftY(value);
+                        markProjectDirty();
+                      }}
                       blueShiftX={blueShiftX}
-                      setBlueShiftX={setBlueShiftX}
+                      setBlueShiftX={(value) => {
+                        setBlueShiftX(value);
+                        markProjectDirty();
+                      }}
                       blueShiftY={blueShiftY}
-                      setBlueShiftY={setBlueShiftY}
+                      setBlueShiftY={(value) => {
+                        setBlueShiftY(value);
+                        markProjectDirty();
+                      }}
                       globalRgbShiftIntensity={globalRgbShiftIntensity}
-                      setGlobalRgbShiftIntensity={setGlobalRgbShiftIntensity}
+                      setGlobalRgbShiftIntensity={(value) => {
+                        setGlobalRgbShiftIntensity(value);
+                        markProjectDirty();
+                      }}
                       sliceCount={sliceCount}
-                      setSliceCount={setSliceCount}
+                      setSliceCount={(value) => {
+                        setSliceCount(value);
+                        markProjectDirty();
+                      }}
                       maxOffset={maxOffset}
-                      setMaxOffset={setMaxOffset}
+                      setMaxOffset={(value) => {
+                        setMaxOffset(value);
+                        markProjectDirty();
+                      }}
                       randomness={randomness}
-                      setRandomness={setRandomness}
+                      setRandomness={(value) => {
+                        setRandomness(value);
+                        markProjectDirty();
+                      }}
                       scanlineThickness={scanlineThickness}
-                      setScanlineThickness={setScanlineThickness}
+                      setScanlineThickness={(value) => {
+                        setScanlineThickness(value);
+                        markProjectDirty();
+                      }}
                       scanlineGap={scanlineGap}
-                      setScanlineGap={setScanlineGap}
+                      setScanlineGap={(value) => {
+                        setScanlineGap(value);
+                        markProjectDirty();
+                      }}
                       flicker={flicker}
-                      setFlicker={setFlicker}
+                      setFlicker={(value) => {
+                        setFlicker(value);
+                        markProjectDirty();
+                      }}
                       curvature={curvature}
-                      setCurvature={setCurvature}
+                      setCurvature={(value) => {
+                        setCurvature(value);
+                        markProjectDirty();
+                      }}
                       maskTarget={maskTarget}
-                      setMaskTarget={setMaskTarget}
+                      setMaskTarget={(value) => {
+                        setMaskTarget(value);
+                        markProjectDirty();
+                      }}
                       maskFeather={maskFeather}
-                      setMaskFeather={setMaskFeather}
+                      setMaskFeather={(value) => {
+                        setMaskFeather(value);
+                        markProjectDirty();
+                      }}
                     />
                   </InspectorWindow>
                 </div>
@@ -2528,6 +3048,11 @@ const Index = () => {
           noise,
         }}
         onLoadPreset={handleLoadPreset}
+        showExitWarning={showExitWarning}
+        isSavingExitWarning={isSavingExitWarning}
+        onSaveAndExit={handleSaveAndExit}
+        onDiscardAndExit={handleDiscardAndExit}
+        onCancelExitWarning={handleCancelExitWarning}
         workflowBusy={workflowBusy}
         jobId={jobId}
         jobKind={jobKind}

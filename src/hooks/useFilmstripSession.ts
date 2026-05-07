@@ -10,9 +10,35 @@ const makeFrameId = () => `frame-${Math.random().toString(36).slice(2, 10)}-${Da
 const loadImageFromSrc = (src: string) =>
   new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = reject;
-    image.src = src;
+    const finalize = (resolvedSrc: string) => {
+      image.onload = () => resolve(image);
+      image.onerror = reject;
+      image.src = resolvedSrc;
+    };
+
+    if (!src || src.startsWith("data:") || src.startsWith("blob:")) {
+      finalize(src);
+      return;
+    }
+
+    void fetch(src)
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Failed to fetch image source: ${response.status} ${response.statusText}`);
+        }
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        image.onload = () => {
+          URL.revokeObjectURL(objectUrl);
+          resolve(image);
+        };
+        image.onerror = () => {
+          URL.revokeObjectURL(objectUrl);
+          reject(new Error("Failed to load image frame"));
+        };
+        image.src = objectUrl;
+      })
+      .catch(() => finalize(src));
   });
 
 export interface UseFilmstripSessionArgs {

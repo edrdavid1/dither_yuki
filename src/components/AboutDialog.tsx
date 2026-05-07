@@ -1,4 +1,4 @@
-import { Delete } from "pixelarticons/react";
+import { X } from "lucide-react";
 
 interface AboutDialogProps {
   onClose: () => void;
@@ -14,7 +14,7 @@ export const AboutDialog = ({ onClose }: AboutDialogProps) => {
             onClick={onClose}
             className="bg-card px-2 text-xs border border-win95-light hover:bg-muted"
           >
-            <Delete className="h-3 w-3" />
+            <X className="h-3 w-3" />
           </button>
         </div>
         <div className="p-6 space-y-4 flex-1 overflow-y-auto win98-scroll">
