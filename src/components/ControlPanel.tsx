@@ -5,8 +5,10 @@ import { Slider } from "@/components/ui/slider";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { MessageText, SettingsCog } from "pixelarticons/react";
 import { ICONS } from "@/components/ui/IconLibrary";
+import { PaletteColorPopover } from "@/components/PaletteColorPopover";
 
 interface ControlPanelProps {
+  isReadOnly?: boolean;
   algorithm: string;
   algorithmOptions: string[];
   setAlgorithm: (value: string) => void;
@@ -94,17 +96,29 @@ interface ControlPanelProps {
   setMaskTarget: (value: "all" | "edges" | "highlights" | "midtones" | "shadows") => void;
   maskFeather: number;
   setMaskFeather: (value: number) => void;
+  cmykSoftProof: boolean;
+  setCmykSoftProof: (value: boolean) => void;
+  maskR: boolean;
+  setMaskR: (value: boolean) => void;
+  maskG: boolean;
+  setMaskG: (value: boolean) => void;
+  maskB: boolean;
+  setMaskB: (value: boolean) => void;
+  maskA: boolean;
+  setMaskA: (value: boolean) => void;
 }
 
-type ModuleId = "dither" | "glitch" | "mask";
+type ModuleId = "dither" | "glitch" | "mask" | "channels";
 
 const MODULES: Array<{ id: ModuleId; title: string; subtitle: string; icon: (props: { className?: string; size?: 16 | 18 }) => JSX.Element }> = [
   { id: "dither", title: "Dither", subtitle: "Quantization + palette", icon: ICONS.DITHER },
   { id: "glitch", title: "Glitch", subtitle: "Sort/channel/corruption", icon: ICONS.GLITCH },
   { id: "mask", title: "Masking", subtitle: "Target + feather", icon: ICONS.MASK },
+  { id: "channels", title: "Channels", subtitle: "RGBA toggles", icon: ICONS.PROPERTIES },
 ];
 
 export const ControlPanel = ({
+  isReadOnly = false,
   algorithm,
   algorithmOptions,
   setAlgorithm,
@@ -192,11 +206,23 @@ export const ControlPanel = ({
   setMaskTarget,
   maskFeather,
   setMaskFeather,
+  cmykSoftProof,
+  setCmykSoftProof,
+  maskR,
+  setMaskR,
+  maskG,
+  setMaskG,
+  maskB,
+  setMaskB,
+  maskA,
+  setMaskA,
 }: ControlPanelProps) => {
   const isDitheringDisabled = algorithm === "None";
   const [activeModuleId, setActiveModuleId] = useState<ModuleId>("dither");
   const [draggedModuleId, setDraggedModuleId] = useState<string | null>(null);
   const [draggedPaletteIndex, setDraggedPaletteIndex] = useState<number | null>(null);
+  const [editingPaletteIndex, setEditingPaletteIndex] = useState<number | null>(null);
+  const [editingPaletteColor, setEditingPaletteColor] = useState<string>("#000000");
   const [blueNoiseEnabled, setBlueNoiseEnabled] = useState(false);
 
   const [stack, setStack] = useState(MODULES);
@@ -215,9 +241,21 @@ export const ControlPanel = ({
     </Tooltip>
   );
 
+  const normalizeHex = (value: string): string | null => {
+    const trimmed = value.trim();
+    const normalized = trimmed.startsWith("#") ? trimmed : `#${trimmed}`;
+    return /^#[0-9a-fA-F]{6}$/.test(normalized) ? normalized.toUpperCase() : null;
+  };
+
   return (
     <TooltipProvider delayDuration={120}>
       <div className="flex flex-col space-y-1">
+        {isReadOnly && (
+          <div className="win95-border-inset px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-amber-300 bg-amber-900/30 border border-amber-700">
+            Layer locked: read-only
+          </div>
+        )}
+        <fieldset disabled={isReadOnly} className="space-y-1 disabled:opacity-80">
         <div className="win98-card">
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -243,35 +281,57 @@ export const ControlPanel = ({
 
           <div>
             <div className="text-xs font-bold mb-1">Active Palette</div>
-            <div className="flex flex-wrap gap-1.5">
+            <div className="relative flex flex-wrap gap-1.5">
               {paletteSwatches.map((hex, index) => (
-                <button
-                  key={`${hex}-${index}`}
-                  type="button"
-                  draggable
-                  onDragStart={() => setDraggedPaletteIndex(index)}
-                  onDragOver={(event) => event.preventDefault()}
-                  onDrop={() => {
-                    if (draggedPaletteIndex === null || draggedPaletteIndex === index) return;
-                    onPaletteReorder(draggedPaletteIndex, index);
-                    setDraggedPaletteIndex(null);
-                  }}
-                  onClick={() => {
-                    const next = window.prompt("Edit color (HEX)", hex)?.trim();
-                    if (!next) return;
-                    onPaletteColorEdit(index, next);
-                  }}
-                  className="h-6 w-6 border border-black/30"
-                  title={`${hex} (drag to reorder, click to edit)`}
-                  style={{ backgroundColor: hex }}
-                />
+                <div key={`${hex}-${index}`} className="relative h-6 w-6">
+                  <button
+                    type="button"
+                    draggable
+                    onDragStart={() => setDraggedPaletteIndex(index)}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={() => {
+                      if (draggedPaletteIndex === null || draggedPaletteIndex === index) return;
+                      onPaletteReorder(draggedPaletteIndex, index);
+                      setDraggedPaletteIndex(null);
+                    }}
+                    onClick={() => {
+                      setEditingPaletteIndex(index);
+                      setEditingPaletteColor((hex || "#000000").toUpperCase());
+                    }}
+                    className="h-6 w-6 border border-black/30"
+                    title={`${hex} (drag to reorder, click to edit)`}
+                    style={{ backgroundColor: hex }}
+                  />
+                </div>
               ))}
+
+              {editingPaletteIndex !== null && (
+                <PaletteColorPopover
+                  title={`Edit color #${editingPaletteIndex + 1}`}
+                  value={editingPaletteColor}
+                  onChange={setEditingPaletteColor}
+                  onCancel={() => setEditingPaletteIndex(null)}
+                  onApply={() => {
+                    const normalized = normalizeHex(editingPaletteColor);
+                    if (normalized && editingPaletteIndex !== null) {
+                      onPaletteColorEdit(editingPaletteIndex, normalized);
+                      setEditingPaletteColor(normalized);
+                    }
+                    setEditingPaletteIndex(null);
+                  }}
+                />
+              )}
             </div>
           </div>
 
           <label className="flex items-center justify-between gap-2 text-xs">
             <span>Snap Glitch to Palette</span>
             <input type="checkbox" checked={snapGlitchToPalette} onChange={(event) => setSnapGlitchToPalette(event.target.checked)} />
+          </label>
+
+          <label className="flex items-center justify-between gap-2 text-xs">
+            <span>CMYK Soft Proof</span>
+            <input type="checkbox" checked={cmykSoftProof} onChange={(event) => setCmykSoftProof(event.target.checked)} />
           </label>
 
           <div className="space-y-2"><div className="flex justify-between text-xs"><span>Palette Mix</span><span>{paletteMix}%</span></div><Slider value={[paletteMix]} onValueChange={(v) => setPaletteMix(v[0])} min={0} max={100} step={1} className="cursor-pointer" /></div>
@@ -351,22 +411,25 @@ export const ControlPanel = ({
                 </SelectContent>
               </Select>
 
+              <Label className="text-sm font-bold">Color Palette</Label>
+              <Select value={palette} onValueChange={setPalette}>
+                <SelectTrigger className="win95-input bg-input"><SelectValue /></SelectTrigger>
+                <SelectContent className="win95-window">
+                  {paletteOptions.map((pal) => (<SelectItem key={pal} value={pal}>{pal}</SelectItem>))}
+                </SelectContent>
+              </Select>
+
               {isDitheringDisabled ? (
-                <div className="text-[11px] text-muted-foreground win95-border p-2">
-                  Dithering is disabled. Preview and final render will keep source colors, while adjustments,
-                  pixel scaling, blur, sharpness, and noise still apply.
+                <div className="text-[11px] text-muted-foreground win95-border p-2 space-y-1">
+                  <div>
+                    Dithering is disabled. Preview and final render will keep source colors, while adjustments,
+                    pixel scaling, blur, sharpness, and noise still apply.
+                  </div>
+                  <div>
+                    Palette selection is preserved (including Custom) and will apply as soon as dithering is enabled.
+                  </div>
                 </div>
-              ) : (
-                <>
-                  <Label className="text-sm font-bold">Color Palette</Label>
-                  <Select value={palette} onValueChange={setPalette}>
-                    <SelectTrigger className="win95-input bg-input"><SelectValue /></SelectTrigger>
-                    <SelectContent className="win95-window">
-                      {paletteOptions.map((pal) => (<SelectItem key={pal} value={pal}>{pal}</SelectItem>))}
-                    </SelectContent>
-                  </Select>
-                </>
-              )}
+              ) : null}
 
               <div className="space-y-2"><div className="flex justify-between text-xs"><span>Scale / Resolution</span><span>{pixelSize}x</span></div><Slider value={[pixelSize]} onValueChange={(v) => setPixelSize(v[0])} min={1} max={16} step={1} className="cursor-pointer" /></div>
               {!isDitheringDisabled && (
@@ -501,7 +564,50 @@ export const ControlPanel = ({
               <div className="space-y-2"><div className="flex justify-between text-xs"><span>Feather</span><span>{maskFeather.toFixed(2)}</span></div><Slider value={[maskFeather]} onValueChange={(v) => setMaskFeather(v[0])} min={0} max={1} step={0.01} className="cursor-pointer" /></div>
             </>
           )}
+
+          {activeModuleId === "channels" && (
+            <>
+              <div className="text-[11px] text-muted-foreground win95-border p-2">
+                Toggle RGBA channels for inspection, stylization, and print-safe previews. This affects rendering, not the source file.
+              </div>
+
+              <div className="win95-border-inset p-2 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-bold">RGBA</span>
+                </div>
+
+                <div className="grid grid-cols-4 gap-2">
+                  {([
+                    { key: "R", on: maskR, set: setMaskR, onBg: "bg-red-600", onText: "text-white" },
+                    { key: "G", on: maskG, set: setMaskG, onBg: "bg-green-600", onText: "text-white" },
+                    { key: "B", on: maskB, set: setMaskB, onBg: "bg-blue-600", onText: "text-white" },
+                    { key: "A", on: maskA, set: setMaskA, onBg: "bg-slate-700", onText: "text-white" },
+                  ] as const).map((item) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => item.set(!item.on)}
+                      className={[
+                        "win95-border-inset",
+                        "h-12 w-full",
+                        "flex items-center justify-center",
+                        "font-bold text-sm select-none",
+                        "transition-colors",
+                        item.on ? `${item.onBg} ${item.onText}` : "bg-muted text-muted-foreground",
+                      ].join(" ")}
+                      aria-pressed={item.on}
+                      aria-label={`Toggle ${item.key} channel`}
+                      title={item.on ? `${item.key} channel enabled` : `${item.key} channel disabled`}
+                    >
+                      {item.key}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
         </div>
+        </fieldset>
       </div>
     </TooltipProvider>
   );

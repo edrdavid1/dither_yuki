@@ -31,7 +31,8 @@ export const Toolbar = ({
 }: ToolbarProps) => {
   return (
     <TooltipProvider delayDuration={120}>
-      <div className="win98-toolbar px-1 py-0.5 gap-1 min-h-0 h-8">
+      <div className="win98-toolbar py-0.5 gap-1 min-h-0 h-8" style={{ paddingLeft: '7.5px', paddingRight: '7.5px' }}>
+
         <div className="flex flex-wrap items-center gap-1">
           {workspaceModes.map((entry) => {
             const active = workspaceMode === entry.value;
@@ -140,12 +141,7 @@ export const Toolbar = ({
           </Tooltip>
         </div> */}
 
-        <div className="ml-auto flex items-center gap-1 text-[10px]">
-          <div className="win98-badge bg-secondary px-1 py-0.5">
-            <ICONS.LIVE_PREVIEW />
-            Live
-          </div>
-        </div>
+        
       </div>
     </TooltipProvider>
   );

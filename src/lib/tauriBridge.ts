@@ -31,6 +31,34 @@ export interface ExportSvgResponse {
   bytes: number[];
 }
 
+export interface GifFrameData {
+  width: number;
+  height: number;
+  delay_ms: number;
+  is_keyframe: boolean;
+  data_url: string;
+}
+
+export interface ImportGifResult {
+  width: number;
+  height: number;
+  loop_count: number;
+  frames: GifFrameData[];
+}
+
+/**
+ * Import a GIF file and decode all frames.
+ * @param gifBytes - Raw GIF file bytes
+ * @returns Decoded GIF frames with metadata
+ */
+export async function importGif(gifBytes: Uint8Array): Promise<ImportGifResult | null> {
+  return safeTauriInvoke<ImportGifResult>("import_gif", {
+    request: {
+      gif_bytes: Array.from(gifBytes),
+    },
+  });
+}
+
 /**
  * Send raw RGBA pixels through the Rust image pipeline and return processed RGBA.
  *
@@ -109,6 +137,40 @@ export async function pickOpenProjectPath(): Promise<string | null> {
       title: "Open Project",
       multiple: false,
       filters: [{ name: "Dither Yuki Project", extensions: ["dyproj"] }],
+    },
+  });
+}
+
+/**
+ * Show a native "Open" dialog scoped to .dyuki files and return the chosen path,
+ * or null if the user cancelled or backend dialog is unavailable.
+ */
+export async function pickOpenPatternPresetPath(): Promise<string | null> {
+  return safeTauriInvoke<string | null>("plugin:dialog|open", {
+    options: {
+      title: "Import Pattern Preset",
+      multiple: false,
+      filters: [{ name: "Dither Yuki Pattern Preset", extensions: ["dyuki"] }],
+    },
+  });
+}
+
+export async function pickOpenPalettePath(): Promise<string | null> {
+  return safeTauriInvoke<string | null>("plugin:dialog|open", {
+    options: {
+      title: "Import Palette",
+      multiple: false,
+      filters: [{ name: "Palettes", extensions: ["ase", "gpl", "hex", "txt", "pal", "json"] }],
+    },
+  });
+}
+
+export async function pickSavePalettePath(defaultName = "palette.gpl"): Promise<string | null> {
+  return safeTauriInvoke<string | null>("plugin:dialog|save", {
+    options: {
+      title: "Export Palette",
+      defaultPath: defaultName,
+      filters: [{ name: "Palettes", extensions: ["ase", "gpl", "hex", "txt", "json"] }],
     },
   });
 }

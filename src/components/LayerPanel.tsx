@@ -65,7 +65,7 @@ export const LayerPanel = ({
                   background: active ? "#e8f0fe" : "transparent",
                 }}
               >
-                <span className="w-6 shrink-0 text-right font-bold">#{index + 1}</span>
+                <span className="w-6 shrink-0 text-right font-bold">#{layer.name}</span>
 
                 <button
                   type="button"
@@ -85,7 +85,10 @@ export const LayerPanel = ({
                     e.stopPropagation();
                     onToggleLock(layer.id);
                   }}
-                  className="flex h-[20px] w-[20px] items-center justify-center border border-black bg-[#f0f0f0] text-[14px] leading-none"
+                  className={[
+                    "flex h-[20px] w-[20px] items-center justify-center border border-black text-[14px] leading-none",
+                    layer.locked ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700",
+                  ].join(" ")}
                   aria-label={layer.locked ? "Unlock layer" : "Lock layer"}
                 >
                   {layer.locked ? <ICONS.LAYER_LOCK size={16} /> : <ICONS.LAYER_UNLOCK size={16} />}
@@ -97,7 +100,8 @@ export const LayerPanel = ({
                     e.stopPropagation();
                     onMoveLayer(layer.id, -1);
                   }}
-                  disabled={index === 0}
+                  disabled={layer.locked || index === 0}
+                  aria-disabled={layer.locked || index === 0}
                   className="flex h-[20px] w-[20px] items-center justify-center border border-black bg-[#f0f0f0] text-[14px] leading-none disabled:opacity-40"
                   aria-label="Move layer up"
                 >
@@ -110,7 +114,7 @@ export const LayerPanel = ({
                     e.stopPropagation();
                     onMoveLayer(layer.id, 1);
                   }}
-                  disabled={index === layers.length - 1}
+                  disabled={layer.locked || index === layers.length - 1}
                   className="flex h-[20px] w-[20px] items-center justify-center border border-black bg-[#f0f0f0] text-[14px] leading-none disabled:opacity-40"
                   aria-label="Move layer down"
                 >
@@ -123,7 +127,7 @@ export const LayerPanel = ({
                     e.stopPropagation();
                     onRemoveLayer(layer.id);
                   }}
-                  disabled={layers.length <= 1}
+                  disabled={layer.locked || layers.length <= 1}
                   className="flex h-[20px] w-[20px] items-center justify-center border border-black bg-[#f0f0f0] text-[14px] leading-none disabled:opacity-40"
                   aria-label="Remove layer"
                 >

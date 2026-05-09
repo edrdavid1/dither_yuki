@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.1.0"
+version = "2.0.0-beta"
 description = "A Tauri App"
 authors = ["you"]
 license = ""
@@ -35,3 +35,7 @@ hex = "0.4"
 tempfile = "3"
 uuid = { version = "1", features = ["v4"] }
 bincode = "1"
+gif = "0.13"
+gif-dispose = "5.0"
+base64 = "0.22"
+rgb = "0.8"

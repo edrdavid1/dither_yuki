@@ -13,14 +13,11 @@ interface AnimationTimelinePanelProps {
   onAddFrame: () => void;
   onImportFrame: () => void;
   onDeleteFrame: () => void;
-  onApplyFrame: () => void;
   onRender: () => void;
-  onToggleKeyframe: (index: number) => void;
   canDeleteFrame: boolean;
   canRunFrameActions: boolean;
   selectedFrameIds?: Set<string>;
   onMultiSelect?: (frameId: string, addToSelection: boolean) => void;
-  onInterpolate?: () => void;
   onApplyToSelected?: () => void;
 }
 
@@ -29,8 +26,7 @@ interface FilmstripThumbProps {
   frame: AnimationFrame;
   active: boolean;
   inMultiSelect: boolean;
-  onSelect: (frameId: string, addToSelection: boolean) => void;
-  onToggleKeyframe: (index: number) => void;
+  onSelect: (frameId: string, shiftKey: boolean, ctrlKey: boolean) => void;
   observerRoot: RefObject<HTMLDivElement>;
 }
 
@@ -40,7 +36,6 @@ const FilmstripThumb = ({
   active,
   inMultiSelect,
   onSelect,
-  onToggleKeyframe,
   observerRoot: _observerRoot,
 }: FilmstripThumbProps) => {
   const ringClass = active
@@ -53,9 +48,9 @@ const FilmstripThumb = ({
     <div className="relative shrink-0">
       <button
         type="button"
-        onClick={(e) => onSelect(frame.id, e.shiftKey)}
+        onClick={(e) => onSelect(frame.id, e.shiftKey, e.ctrlKey || e.metaKey)}
         className={`win95-border-inset relative h-[36px] w-[36px] overflow-hidden bg-[#bdbdbd] ${ringClass}`}
-        title={`Frame ${index + 1}${frame.isKeyframe ? " (keyframe)" : ""}`}
+        title={`Frame ${index + 1}${inMultiSelect ? " (selected)" : ""}`}
       >
         {frame.src ? (
           <img
@@ -74,25 +69,6 @@ const FilmstripThumb = ({
           {index + 1}
         </span>
       </button>
-
-      {/* Keyframe diamond indicator — click to toggle */}
-      <button
-        type="button"
-        title={frame.isKeyframe ? "Keyframe — click to remove" : "Click to mark as keyframe"}
-        className="absolute -top-[5px] left-1/2 -translate-x-1/2 z-10 cursor-pointer"
-        onClick={(e) => {
-          e.stopPropagation();
-          onToggleKeyframe(index);
-        }}
-      >
-        <span
-          className={`block h-[8px] w-[8px] rotate-45 border ${
-            frame.isKeyframe
-              ? "bg-[#000080] border-[#000080]"
-              : "bg-transparent border-[#666] opacity-40 hover:opacity-80"
-          }`}
-        />
-      </button>
     </div>
   );
 };
@@ -107,14 +83,11 @@ export const AnimationTimelinePanel = ({
   onAddFrame,
   onImportFrame,
   onDeleteFrame,
-  onApplyFrame,
   onRender,
-  onToggleKeyframe,
   canDeleteFrame,
   canRunFrameActions,
   selectedFrameIds,
   onMultiSelect,
-  onInterpolate,
   onApplyToSelected,
 }: AnimationTimelinePanelProps) => {
   const filmstripRootRef = useRef<HTMLDivElement>(null);
@@ -138,11 +111,24 @@ export const AnimationTimelinePanel = ({
               frame={frame}
               active={selectedFrame === index}
               inMultiSelect={selectedFrameIds?.has(frame.id) ?? false}
-              onSelect={onMultiSelect ?? ((frameId) => {
-                const idx = frames.findIndex((item) => item.id === frameId);
-                if (idx >= 0) onSelectFrame(idx);
-              })}
-              onToggleKeyframe={onToggleKeyframe}
+              onSelect={(frameId, shiftKey, ctrlKey) => {
+                if (onMultiSelect && (ctrlKey || (selectedFrameIds && selectedFrameIds.size > 0 && !shiftKey))) {
+                  onMultiSelect(frameId, ctrlKey);
+                } else if (shiftKey && selectedFrameIds && selectedFrameIds.size > 0) {
+                  const lastSelectedId = Array.from(selectedFrameIds).pop() ?? frames[selectedFrame]?.id;
+                  const lastIdx = frames.findIndex((f) => f.id === lastSelectedId);
+                  const currentIdx = frames.findIndex((f) => f.id === frameId);
+                  const start = Math.min(lastIdx, currentIdx);
+                  const end = Math.max(lastIdx, currentIdx);
+                  for (let i = start; i <= end; i++) {
+                    onMultiSelect?.(frames[i]!.id, true);
+                  }
+                } else {
+                  selectedFrameIds?.clear();
+                  const idx = frames.findIndex((item) => item.id === frameId);
+                  if (idx >= 0) onSelectFrame(idx);
+                }
+              }}
               observerRoot={filmstripRootRef}
             />
           ))}
@@ -192,42 +178,20 @@ export const AnimationTimelinePanel = ({
               <TooltipContent className="text-xs">Import frame from file</TooltipContent>
             </Tooltip>
 
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  className="win95-button h-[20px] px-[4px] text-[9px] leading-none"
-                  onClick={onApplyToSelected ?? onApplyFrame}
-                  disabled={!canRunFrameActions}
-                >
-                  Apply
-                </button>
-              </TooltipTrigger>
-              <TooltipContent className="text-xs">
-                {selectedFrameIds && selectedFrameIds.size > 1
-                  ? `Save settings to ${selectedFrameIds.size} selected frames (marks as keyframes)`
-                  : "Save current settings to this frame (marks as keyframe)"}
-              </TooltipContent>
-            </Tooltip>
-
-            {onInterpolate && (
+            {selectedFrameIds && selectedFrameIds.size > 1 && onApplyToSelected && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
                     type="button"
                     className="win95-button h-[20px] px-[4px] text-[9px] leading-none"
-                    onClick={onInterpolate}
-                    disabled={
-                      !canRunFrameActions ||
-                      !selectedFrameIds ||
-                      selectedFrameIds.size < 2
-                    }
+                    onClick={onApplyToSelected}
+                    disabled={!canRunFrameActions}
                   >
-                    ~
+                    Apply
                   </button>
                 </TooltipTrigger>
                 <TooltipContent className="text-xs">
-                  Interpolate params between selected keyframes
+                  Apply current settings to {selectedFrameIds.size} selected frames
                 </TooltipContent>
               </Tooltip>
             )}
@@ -272,7 +236,7 @@ export const AnimationTimelinePanel = ({
       <div className="win95-border-inset mt-[1px] bg-input/90 px-[2px] py-0 h-[16px] max-h-[20px] flex items-center justify-between gap-1 text-[9px] text-muted-foreground leading-none">
         <span>
           #{selectedFrame + 1} / {frameCount}
-          {frames[selectedFrame]?.isKeyframe ? " \u25C6 keyframe" : ""}
+          {selectedFrameIds && selectedFrameIds.size > 1 ? ` (${selectedFrameIds.size} selected)` : ""}
         </span>
         <span className="truncate">{workflowStatus ?? "Filmstrip editor"}</span>
       </div>

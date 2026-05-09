@@ -24,13 +24,25 @@ import {
 } from "@/utils/dithering";
 import { useImageWorker } from "@/hooks/useImageWorker";
 import { useEditorControlSync } from "@/hooks/useEditorControlSync";
+import { useFrameLayerSync } from "@/hooks/useFrameLayerSync";
 import { useLayerSession } from "@/hooks/useLayerSession";
 import { useFilmstripSession } from "@/hooks/useFilmstripSession";
 import { usePreviewOrchestration } from "@/hooks/usePreviewOrchestration";
-import { exportSvgFrame, readBytesFromPath, saveSvgWithDialog, safeTauriInvoke, pickSaveProjectPath, pickOpenProjectPath } from "@/lib/tauriBridge";
+import { useProjectHydrator } from "@/hooks/useProjectHydrator";
+import { useVideoJobLifecycle, type VideoJobProgressResponse } from "@/hooks/useVideoJobLifecycle";
+import { useLayerReadOnlyGuards } from "@/hooks/useLayerReadOnlyGuards";
+import { usePaletteWorkflow } from "@/hooks/usePaletteWorkflow";
+import { usePerformanceBudget } from "@/hooks/usePerformanceBudget";
+import {
+  exportSvgFrame,
+  importGif,
+  readBytesFromPath,
+  saveSvgWithDialog,
+  safeTauriInvoke,
+} from "@/lib/tauriBridge";
 import { useProjectStore } from "@/store/projectStore";
-import { decodeFilmstripProjectData, encodeFilmstripProjectData } from "@/lib/animation/filmstripPersistence";
 import { type FrameSettings } from "@/types/frameSettings";
+import { validateBackendPayload } from "@/lib/layerMapping";
 import {
   buildSiblingOutputPath,
   downloadBytes,
@@ -46,7 +58,7 @@ import {
   buildBackendLayersPayload,
   cloneLayer,
   cloneLayers,
-  createDefaultLayer,
+  createNeutralLayer,
   type Layer,
 } from "@/types/layers";
 import { toast } from "sonner";
@@ -127,16 +139,6 @@ interface ExportSvgResponse {
   bytes: number[];
 }
 
-interface VideoJobProgressResponse {
-  job_id: string;
-  status: "queued" | "running" | "completed" | "cancelled" | "failed";
-  current_frame: number;
-  total_frames: number;
-  cancellation_requested: boolean;
-  output_path?: string | null;
-  message?: string | null;
-}
-
 interface DependencyStatusResponse {
   ffmpeg_available: boolean;
   ffmpeg_version?: string | null;
@@ -144,6 +146,11 @@ interface DependencyStatusResponse {
   ffprobe_available: boolean;
   ffprobe_version?: string | null;
   ffprobe_source?: string | null;
+}
+
+interface ColorPipelineSnapshot {
+  capturedAt: number;
+  layersPayload: ReturnType<typeof buildBackendLayersPayload>;
 }
 
 
@@ -246,6 +253,43 @@ const loadImageFromSrc = (src: string) =>
         finalize(src);
       });
   });
+
+const applyCmykSoftProof = (rgba: Uint8ClampedArray): Uint8ClampedArray => {
+  const out = new Uint8ClampedArray(rgba);
+  const dotGain = 0.12;
+  const totalInkLimit = 2.9; // slightly below 300%
+
+  for (let i = 0; i < out.length; i += 4) {
+    const r = (out[i] ?? 0) / 255;
+    const g = (out[i + 1] ?? 0) / 255;
+    const b = (out[i + 2] ?? 0) / 255;
+
+    const k = 1 - Math.max(r, g, b);
+    const denom = Math.max(1e-6, 1 - k);
+    let c = (1 - r - k) / denom;
+    let m = (1 - g - k) / denom;
+    let y = (1 - b - k) / denom;
+
+    c = Math.max(0, Math.min(1, Math.pow(c, 1 - dotGain)));
+    m = Math.max(0, Math.min(1, Math.pow(m, 1 - dotGain)));
+    y = Math.max(0, Math.min(1, Math.pow(y, 1 - dotGain)));
+    const kk = Math.max(0, Math.min(1, Math.pow(k, 1 - dotGain)));
+
+    const totalInk = c + m + y + kk;
+    if (totalInk > totalInkLimit) {
+      const scale = totalInkLimit / totalInk;
+      c *= scale;
+      m *= scale;
+      y *= scale;
+    }
+
+    out[i] = Math.round(255 * (1 - c) * (1 - kk));
+    out[i + 1] = Math.round(255 * (1 - m) * (1 - kk));
+    out[i + 2] = Math.round(255 * (1 - y) * (1 - kk));
+  }
+
+  return out;
+};
 
 // Keep preview close to source fidelity so inspector tuning matches final render.
 // 4K is a practical ceiling for interactive UI memory usage.
@@ -546,8 +590,13 @@ const Index = () => {
   const [showOriginal, setShowOriginal] = useState(true);
   const [showColorStudio, setShowColorStudio] = useState(false);
   const [customColors, setCustomColors] = useState<string[]>(["#000000", "#FFFFFF"]);
+  const [maskR, setMaskR] = useState(true);
+  const [maskG, setMaskG] = useState(true);
+  const [maskB, setMaskB] = useState(true);
+  const [maskA, setMaskA] = useState(true);
   const [snapGlitchToPalette, setSnapGlitchToPalette] = useState(false);
   const [paletteMix, setPaletteMix] = useState(100);
+  const [cmykSoftProof, setCmykSoftProof] = useState(false);
   const [globalSeed, setGlobalSeed] = useState(1337);
   const [glitchType, setGlitchType] = useState<"None" | "Pixel Sort" | "Block Noise" | "RGB Shift" | "Slice" | "Analog">("None");
   const [pixelSortMetric, setPixelSortMetric] = useState<"luma" | "saturation" | "hue" | "rgb-sum">("luma");
@@ -600,7 +649,7 @@ const Index = () => {
   const [animationPreviewFps, setAnimationPreviewFps] = useState(12);
   const [animationPreviewSpeed, setAnimationPreviewSpeed] = useState(1);
   const [selectedFrameIds, setSelectedFrameIds] = useState<Set<string>>(new Set());
-  const [layers, setLayers] = useState<Layer[]>(() => [createDefaultLayer("Layer 1")]);
+  const [layers, setLayers] = useState<Layer[]>(() => [createNeutralLayer("1")]);
   const [activeLayerId, setActiveLayerId] = useState<string>(() => layers[0]?.id ?? "");
 
   /** Full-resolution source RGBA cache for video-extracted frames. */
@@ -612,6 +661,7 @@ const Index = () => {
   const [workflowBusy, setWorkflowBusy] = useState(false);
   const [workflowStatus, setWorkflowStatus] = useState<string>();
   const [previewProcessing, setPreviewProcessing] = useState(false);
+  const [previewQuality, setPreviewQuality] = useState<"fast" | "accurate">("fast");
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [showExitWarning, setShowExitWarning] = useState(false);
   const [isSavingExitWarning, setIsSavingExitWarning] = useState(false);
@@ -619,8 +669,8 @@ const Index = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
   const presetImportInputRef = useRef<HTMLInputElement>(null);
-  const jobPollMissesRef = useRef(0);
   const previewRequestIdRef = useRef(0);
+  const previewRgbaCacheRef = useRef<Map<string, { width: number; height: number; rgba: Uint8ClampedArray }>>(new Map());
   const framesRef = useRef<AnimationFrame[]>(frames);
   framesRef.current = frames;
   const layersRef = useRef<Layer[]>(layers);
@@ -636,6 +686,7 @@ const Index = () => {
   // to this limit before being sent to the backend, reducing IPC payload by up to
   // 10-20× for large photos while keeping the preview visually accurate.
   const MAX_PREVIEW_PX = 1200;
+  const MAX_PREVIEW_RGBA_CACHE_ENTRIES = 24;
 
   // Deferred versions of pipeline params so slider drags don't queue
   // multiple heavy renders — React batches deferred updates and only
@@ -679,9 +730,17 @@ const Index = () => {
   const deferredMaskTarget = useDeferredValue(maskTarget);
   const deferredMaskFeather = useDeferredValue(maskFeather);
 
+  const customPaletteRgb = useMemo(
+    () => customColors
+      .map(hexToRgb)
+      .filter((color): color is [number, number, number] => color !== null),
+    [customColors],
+  );
+
   const editorControlValues = useMemo(() => ({
     algorithm,
     palette,
+    customPalette: customPaletteRgb,
     intensity,
     contrast,
     brightness,
@@ -721,9 +780,14 @@ const Index = () => {
     paletteMix,
     maskTarget,
     maskFeather,
+    maskR,
+    maskG,
+    maskB,
+    maskA,
   }), [
     algorithm,
     palette,
+    customPaletteRgb,
     intensity,
     contrast,
     brightness,
@@ -763,6 +827,10 @@ const Index = () => {
     paletteMix,
     maskTarget,
     maskFeather,
+    maskR,
+    maskG,
+    maskB,
+    maskA,
   ]);
 
   const activeAdjustments = [
@@ -790,12 +858,15 @@ const Index = () => {
           color[2] ?? 0,
         ]));
 
-  const customPaletteRgb = useMemo(
-    () => customColors
-      .map(hexToRgb)
-      .filter((color): color is [number, number, number] => color !== null),
-    [customColors],
-  );
+  const { isActiveLayerLocked, updateActiveLayerControl } = useLayerReadOnlyGuards({
+    activeLayerIdRef,
+    layersRef,
+    markProjectDirty,
+  });
+
+  const { measureBudget } = usePerformanceBudget({
+    setStatus,
+  });
 
   const jobProgressText = jobProgress
     ? `${jobProgress.status} ${jobProgress.current_frame}/${jobProgress.total_frames}`
@@ -809,6 +880,28 @@ const Index = () => {
   const videoRenderBlockedReason = canRenderVideo
     ? undefined
     : "FFmpeg/FFprobe not found. Video render disabled.";
+
+  const domainState = useMemo(() => ({
+    layers,
+    frames,
+    activeLayerId,
+    paletteSwatches,
+    customColors,
+  }), [activeLayerId, customColors, frames, layers, paletteSwatches]);
+
+  const viewState = useMemo(() => ({
+    workspaceMode,
+    focusMode,
+    leftPanelVisible,
+    showColorStudio,
+  }), [focusMode, leftPanelVisible, showColorStudio, workspaceMode]);
+
+  const transientState = useMemo(() => ({
+    previewProcessing,
+    previewQuality,
+    workflowBusy,
+    videoPreviewBusy,
+  }), [previewProcessing, previewQuality, videoPreviewBusy, workflowBusy]);
 
   const handleOpenFile = useCallback(() => {
     if (workspaceMode === "video") {
@@ -1000,10 +1093,66 @@ const Index = () => {
     void buildPreview();
   };
 
+  const handleGifFile = useCallback(async (file: File) => {
+    setStatus("GIF loading...");
+    try {
+      const gifBytes = new Uint8Array(await file.arrayBuffer());
+      const decoded = await importGif(gifBytes);
+      if (!decoded || !decoded.frames.length) {
+        toast.error("Failed to decode GIF frames");
+        setStatus("GIF import failed");
+        return;
+      }
+
+      const baseLayers = cloneLayers(layersRef.current);
+      const activeLayer = activeLayerIdRef.current || baseLayers[0]?.id || "";
+      const importedFrames = decoded.frames.map((frame, index) => makeAnimationFrame({
+        id: `gif-${Date.now()}-${index}`,
+        src: frame.data_url,
+        width: frame.width,
+        height: frame.height,
+        layers: cloneLayers(baseLayers),
+        activeLayerId: activeLayer,
+        isKeyframe: true,
+      }));
+
+      setWorkspaceMode("animation");
+      setVideoSource(null);
+      setVideoMetadata(null);
+      setVideoPreviewFrames([]);
+      setSelectedVideoPreviewFrame(0);
+      setFrames(importedFrames);
+      setSelectedFrameIndex(0);
+      setSelectedFrameIds(new Set(importedFrames[0] ? [importedFrames[0].id] : []));
+      setIsPlaying(false);
+
+      const firstFrame = importedFrames[0];
+      if (firstFrame) {
+        const firstImage = await loadImageFromSrc(firstFrame.src);
+        setOriginalImage(firstImage);
+        setProcessedImage(null);
+        setShowOriginal(true);
+        setImageSize(`${firstImage.width}×${firstImage.height}`);
+      }
+
+      setStatus(`GIF imported — ${importedFrames.length} frames`);
+      toast.success(`GIF imported: ${importedFrames.length} frames`);
+      markProjectDirty();
+    } catch (error) {
+      console.error("Failed to import GIF", error);
+      toast.error("Failed to import GIF");
+      setStatus("GIF import failed");
+    }
+  }, [markProjectDirty, setFrames, setSelectedFrameIds, setWorkspaceMode]);
+
   const handleFile = useCallback((file: File) => {
     if (file.type.startsWith("video/")) {
       setWorkspaceMode("video");
       handleVideoFile(file);
+      return;
+    }
+    if (file.type === "image/gif" || file.name.toLowerCase().endsWith(".gif")) {
+      void handleGifFile(file);
       return;
     }
 
@@ -1011,26 +1160,9 @@ const Index = () => {
     reader.onload = (event) => {
       const img = new Image();
       img.onload = () => {
-        const frameSrc = event.target?.result as string;
-        const quantizeCanvas = document.createElement("canvas");
-        quantizeCanvas.width = 128;
-        quantizeCanvas.height = 128;
-        const quantizeCtx = quantizeCanvas.getContext("2d");
-        if (quantizeCtx) {
-          quantizeCtx.imageSmoothingEnabled = true;
-          quantizeCtx.drawImage(img, 0, 0, 256, 256);
-          const sampled = extractPaletteLocal(
-            quantizeCtx.getImageData(0, 0, 256, 256).data,
-            Math.max(2, quantizationColorCount),
-            quantizationMethod,
-          );
-          if (sampled.length >= 2) {
-            const sampledHex = sampled.map(rgbToHex);
-            setCustomColors(sampledHex);
-            setCustomPalette(sampledHex);
-            setPalette("Custom");
-          }
-        }
+        // Neutral import: do not auto-apply palette/effect.
+        setAlgorithm("None");
+        setPalette("Grayscale");
         setSourceImageFile(file);
         setOriginalImage(img);
         setProcessedImage(null);
@@ -1040,13 +1172,12 @@ const Index = () => {
         setSelectedFrameIndex(0);
         setIsPlaying(false);
         setImageSize(`${img.width}\u00d7${img.height}`);
-        setStatus("Image loaded (palette sampled from source)");
+        setStatus("Image loaded");
       };
       img.src = event.target?.result as string;
     };
     reader.readAsDataURL(file);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quantizationColorCount, quantizationMethod]);
+  }, [handleGifFile]);
 
   useEffect(() => {
     const handleWindowDragOver = (event: DragEvent) => {
@@ -1082,6 +1213,7 @@ const Index = () => {
     handleVideoFile(file);
   };
 
+  // Control sync hook - handles editor parameter state and undo/redo
   const {
     captureEffectParams,
     applyEffectParams,
@@ -1090,6 +1222,7 @@ const Index = () => {
   } = useEditorControlSync({
     values: editorControlValues,
     setters: {
+      setCustomColors,
       setAlgorithm,
       setPalette,
       setIntensity,
@@ -1131,48 +1264,16 @@ const Index = () => {
       setPaletteMix,
       setMaskTarget,
       setMaskFeather,
+      setMaskR,
+      setMaskG,
+      setMaskB,
+      setMaskA,
     },
   });
 
-  const persistCurrentLayersToFrame = useCallback((nextLayers: Layer[], nextActiveLayerId = activeLayerIdRef.current) => {
-    if (framesRef.current.length === 0) return;
-
-    const snapshot = cloneLayers(nextLayers);
-    const targetIndex = Math.max(0, Math.min(selectedFrameIndex, framesRef.current.length - 1));
-    const targetFrame = framesRef.current[targetIndex];
-
-    layersRef.current = snapshot;
-    activeLayerIdRef.current = nextActiveLayerId;
-    framesRef.current = framesRef.current.map((frame, index) => (
-      index === targetIndex
-        ? {
-            ...frame,
-            layers: snapshot,
-            activeLayerId: nextActiveLayerId,
-            isKeyframe: true,
-          }
-        : frame
-    ));
-
-    setFrames((prev) => prev.map((frame, index) => (
-      index === targetIndex
-        ? {
-            ...frame,
-            layers: snapshot,
-            activeLayerId: nextActiveLayerId,
-            isKeyframe: true,
-          }
-        : frame
-    )));
-    if (targetFrame) {
-      void renderFramePreview(targetFrame.id, snapshot);
-      markProjectDirty();
-    }
-  }, [selectedFrameIndex]);
-
   const activeLayersPayload = useMemo(() => {
     const mergedLayers = layers.map((layer) => (
-      layer.id === activeLayerId
+      layer.id === activeLayerId && !layer.locked
         ? {
             ...layer,
             settings: {
@@ -1183,8 +1284,146 @@ const Index = () => {
         : layer
     ));
 
-    return buildBackendLayersPayload(mergedLayers, customPaletteRgb);
+    const payload = buildBackendLayersPayload(mergedLayers, customPaletteRgb);
+
+    // Guardrail: validate payload before it reaches backend
+    if (process.env.NODE_ENV === "development") {
+      const invalidItems = payload
+        .map((item, idx) => ({ valid: validateBackendPayload(item), idx, item }))
+        .filter((r) => r.valid === null);
+      if (invalidItems.length > 0) {
+        console.error("[layer-validation] Invalid backend payload detected:", invalidItems);
+      }
+    }
+
+    return payload;
   }, [activeLayerId, customPaletteRgb, editorControlValues, layers]);
+
+  const captureColorPipelineSnapshot = useCallback((): ColorPipelineSnapshot => {
+    const mergedLayers = layersRef.current.map((layer) => (
+      layer.id === activeLayerIdRef.current && !layer.locked
+        ? {
+            ...layer,
+            settings: {
+              ...layer.settings,
+              ...editorControlValues,
+            },
+          }
+        : layer
+    ));
+    const paletteSnapshot = customPaletteRgb.map((rgb) => [rgb[0], rgb[1], rgb[2]] as [number, number, number]);
+    const layersPayload = buildBackendLayersPayload(mergedLayers, paletteSnapshot);
+
+    if (process.env.NODE_ENV === "development") {
+      const invalidItems = layersPayload
+        .map((item, idx) => ({ valid: validateBackendPayload(item), idx, item }))
+        .filter((r) => r.valid === null);
+      if (invalidItems.length > 0) {
+        console.error("[layer-validation] Invalid backend payload detected:", invalidItems);
+      }
+    }
+
+    return {
+      capturedAt: Date.now(),
+      layersPayload,
+    };
+  }, [customPaletteRgb, editorControlValues]);
+
+  const getOrCreatePreviewRgbaFrame = useCallback(async (
+    cacheKey: string,
+    image: HTMLImageElement,
+    maxDimension: number | undefined,
+  ) => {
+    const cached = previewRgbaCacheRef.current.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const frame = await imageToRgbaFrame(image, maxDimension);
+    const snapshot = {
+      width: frame.width,
+      height: frame.height,
+      rgba: frame.rgba,
+    };
+    previewRgbaCacheRef.current.set(cacheKey, snapshot);
+
+    // Keep cache bounded to avoid unbounded memory growth while navigating frames.
+    if (previewRgbaCacheRef.current.size > MAX_PREVIEW_RGBA_CACHE_ENTRIES) {
+      const oldestKey = previewRgbaCacheRef.current.keys().next().value;
+      if (oldestKey) {
+        previewRgbaCacheRef.current.delete(oldestKey);
+      }
+    }
+
+    return snapshot;
+  }, []);
+
+  // Frame preview renderer - defined early for useFrameLayerSync
+  const renderFramePreview = useCallback(async (
+    frameId: string,
+    snapshotLayers?: Layer[],
+    sourceImage?: HTMLImageElement | null,
+    forceProcessedImage = false,
+  ): Promise<string | null> => {
+    const frame = framesRef.current.find((item) => item.id === frameId) ?? null;
+    if (!frame) return null;
+
+    try {
+      const image = sourceImage ?? await loadImageFromSrc(frame.src);
+      const sourceKey = imageToFrameSrc(image) || frame.src || frame.id;
+      const rgbaFrame = await getOrCreatePreviewRgbaFrame(
+        `frame:${frame.id}:${sourceKey}:fast`,
+        image,
+        MAX_PREVIEW_PX,
+      );
+      const paletteSnapshot = customPaletteRgb.map((rgb) => [rgb[0], rgb[1], rgb[2]] as [number, number, number]);
+      const payload = buildBackendLayersPayload(snapshotLayers ?? frame.layers, paletteSnapshot);
+
+      const imageData = new ImageData(
+        new Uint8ClampedArray(rgbaFrame.rgba),
+        rgbaFrame.width,
+        rgbaFrame.height,
+      );
+
+      const { buffer, width, height } = await processImage(imageData, payload);
+      const rendered = new Uint8ClampedArray(buffer);
+      const previewBytes = cmykSoftProof ? applyCmykSoftProof(rendered) : rendered;
+      const previewImage = await rgbaToImage(previewBytes, width, height);
+      const previewDataUrl = previewImage.src;
+
+      setFrames((prev) => {
+        const index = prev.findIndex((item) => item.id === frameId);
+        if (index < 0) return prev;
+        const existing = prev[index];
+        if (!existing || existing.previewDataUrl === previewDataUrl) {
+          return prev;
+        }
+        const next = [...prev];
+        next[index] = { ...existing, previewDataUrl };
+        return next;
+      });
+
+      if (forceProcessedImage || framesRef.current[selectedFrameIndex]?.id === frameId) {
+        setProcessedImage(previewImage);
+      }
+
+      return previewDataUrl;
+    } catch (error) {
+      console.error("Failed to render frame preview", error);
+      return null;
+    }
+  }, [cmykSoftProof, customPaletteRgb, getOrCreatePreviewRgbaFrame, processImage, selectedFrameIndex]);
+
+  // Frame-layer synchronization - canonical source for layer persistence
+  const { persistCurrentLayersToFrame, syncLayersFromFrame } = useFrameLayerSync({
+    framesRef,
+    layersRef,
+    activeLayerIdRef,
+    selectedFrameIndex,
+    setFrames,
+    renderFramePreview,
+    markProjectDirty,
+  });
 
   const applyLayerSnapshotToControls = useCallback((layerSnapshot: Layer | null) => {
     if (!layerSnapshot) return;
@@ -1195,14 +1434,21 @@ const Index = () => {
   const commitControlsToActiveEffect = useCallback((): Layer[] | null => {
     const settings = captureEffectParams();
     const currentLayerId = activeLayerIdRef.current;
+    let didUpdate = false;
 
     const next = layersRef.current.map((layer) => {
       if (layer.id !== currentLayerId) return cloneLayer(layer);
+      if (layer.locked) return cloneLayer(layer);
+      didUpdate = true;
       return {
         ...cloneLayer(layer),
         settings: { ...settings },
       };
     });
+
+    if (!didUpdate) {
+      return null;
+    }
 
     setLayers(next);
     persistCurrentLayersToFrame(next, currentLayerId);
@@ -1210,6 +1456,7 @@ const Index = () => {
     return next;
   }, [captureEffectParams, persistCurrentLayersToFrame]);
 
+  // Layer session - command-based layer operations
   const {
     handleSelectLayer,
     handleToggleLayerVisibility,
@@ -1230,50 +1477,6 @@ const Index = () => {
     applyLayerSnapshotToControls,
     persistCurrentLayersToFrame,
   });
-
-  // ──────────────────────────────────────────────────────────────────────────
-
-  const renderFramePreview = useCallback(async (
-    frameId: string,
-    snapshotLayers?: Layer[],
-    sourceImage?: HTMLImageElement | null,
-    forceProcessedImage = false,
-  ): Promise<string | null> => {
-    const frame = framesRef.current.find((item) => item.id === frameId) ?? null;
-    if (!frame) return null;
-
-    try {
-      const image = sourceImage ?? await loadImageFromSrc(frame.src);
-      const rgbaFrame = await imageToRgbaFrame(image, MAX_PREVIEW_PX);
-      const payload = buildBackendLayersPayload(snapshotLayers ?? frame.layers, customPaletteRgb);
-
-      const imageData = new ImageData(
-        new Uint8ClampedArray(rgbaFrame.rgba),
-        rgbaFrame.width,
-        rgbaFrame.height,
-      );
-
-      const { buffer, width, height } = await processImage(imageData, payload);
-
-      const previewImage = await rgbaToImage(new Uint8ClampedArray(buffer), width, height);
-      const previewDataUrl = previewImage.src;
-
-      setFrames((prev) => prev.map((item) => (
-        item.id === frameId
-          ? { ...item, previewDataUrl }
-          : item
-      )));
-
-      if (forceProcessedImage || framesRef.current[selectedFrameIndex]?.id === frameId) {
-        setProcessedImage(previewImage);
-      }
-
-      return previewDataUrl;
-    } catch (error) {
-      console.error("Failed to render frame preview", error);
-      return null;
-    }
-  }, [customPaletteRgb, processImage, selectedFrameIndex]);
 
   const {
     handleAddFrameClone,
@@ -1315,17 +1518,24 @@ const Index = () => {
   const renderInspectorPreview = useCallback(async (
     sourceImage: HTMLImageElement,
     _preferBackend: boolean,
+    quality: "fast" | "accurate" = "fast",
   ) => {
     const requestId = previewRequestIdRef.current + 1;
     previewRequestIdRef.current = requestId;
     setPreviewProcessing(true);
+    const colorSnapshot = captureColorPipelineSnapshot();
 
     try {
       let previewImage: HTMLImageElement | null = null;
-
-      const frame = await imageToRgbaFrame(sourceImage, MAX_PREVIEW_PX);
+      const sourceKey = imageToFrameSrc(sourceImage) || "inspector";
+      const previewMaxDimension = quality === "fast" ? MAX_PREVIEW_PX : undefined;
+      const frame = await getOrCreatePreviewRgbaFrame(
+        `inspector:${sourceKey}:${quality}`,
+        sourceImage,
+        previewMaxDimension,
+      );
       const frameSize = frame.width * frame.height * 4;
-      const packedResult = activeLayersPayload.length > 0
+      const packedResult = colorSnapshot.layersPayload.length > 0
         ? await safeTauriInvoke<ProcessVideoFramesPackedResponse>(
             "process_video_frames_packed",
             {
@@ -1335,7 +1545,7 @@ const Index = () => {
                 frame_count: 1,
                 frame_size: frameSize,
                 frames_blob: new Uint8Array(frame.rgba),
-                layers: activeLayersPayload,
+                layers: colorSnapshot.layersPayload,
                 temporal: { enabled: false, mode: "sine", amount: 0, speed: 1, phase: 0 },
               },
             },
@@ -1343,24 +1553,30 @@ const Index = () => {
         : null;
 
       if (packedResult?.frame_count) {
-        const processedFrame = packedResult.processed_frames_blob.slice(0, packedResult.frame_size);
-        previewImage = await rgbaToImage(processedFrame, packedResult.width, packedResult.height);
+        const processedFrame = new Uint8ClampedArray(
+          packedResult.processed_frames_blob.slice(0, packedResult.frame_size),
+        );
+        const previewBytes = cmykSoftProof ? applyCmykSoftProof(processedFrame) : processedFrame;
+        previewImage = await rgbaToImage(previewBytes, packedResult.width, packedResult.height);
       }
 
       if (!previewImage) {
-        const canvas = document.createElement("canvas");
-        canvas.width = sourceImage.width;
-        canvas.height = sourceImage.height;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) throw new Error("Failed to create canvas context for preview");
-        ctx.drawImage(sourceImage, 0, 0);
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const { buffer, width, height } = await processImage(imageData, activeLayersPayload);
-        previewImage = await rgbaToImage(new Uint8ClampedArray(buffer), width, height);
+        // Fallback must use the same downscaled frame as packed path; full-size
+        // canvas processing here can freeze UI on large sources.
+        const imageData = new ImageData(
+          new Uint8ClampedArray(frame.rgba),
+          frame.width,
+          frame.height,
+        );
+        const { buffer, width, height } = await processImage(imageData, colorSnapshot.layersPayload);
+        const rendered = new Uint8ClampedArray(buffer);
+        const previewBytes = cmykSoftProof ? applyCmykSoftProof(rendered) : rendered;
+        previewImage = await rgbaToImage(previewBytes, width, height);
       }
 
       if (requestId !== previewRequestIdRef.current) return;
       setProcessedImage(previewImage);
+      setPreviewQuality(quality);
       setStatus("Ready");
     } catch (error) {
       if (requestId !== previewRequestIdRef.current) return;
@@ -1369,7 +1585,7 @@ const Index = () => {
     } finally {
       setPreviewProcessing(false);
     }
-  }, [activeLayersPayload, processImage]);
+  }, [captureColorPipelineSnapshot, cmykSoftProof, getOrCreatePreviewRgbaFrame, processImage]);
 
   usePreviewOrchestration({
     originalImage,
@@ -1384,6 +1600,13 @@ const Index = () => {
     setStatus,
     setPreviewProcessing,
     maxPreviewPx: MAX_PREVIEW_PX,
+    accuratePreviewMaxPixels: 3_000_000,
+    onPreviewQualityChange: setPreviewQuality,
+    onPreviewLatencyMeasured: (latencyMs, quality) => {
+      if (latencyMs > 120) {
+        setStatus(`Preview (${quality}) ${latencyMs}ms`);
+      }
+    },
   });
 
   const handleToggleAnimationPlayback = useCallback(() => {
@@ -1532,6 +1755,7 @@ const Index = () => {
     setWorkflowBusy(true);
     setJobKind("video");
     setStatus("Submitting video workflow...");
+    const colorSnapshot = captureColorPipelineSnapshot();
 
     try {
       const nativePath = getNativeFilePath(videoSource);
@@ -1541,7 +1765,7 @@ const Index = () => {
       });
 
       const requestBase = {
-        layers: activeLayersPayload,
+        layers: colorSnapshot.layersPayload,
         temporal: { enabled: false, mode: "sine", amount: 0, speed: 1, phase: 0 },
         tracks: [],
         keep_audio: true,
@@ -1582,20 +1806,18 @@ const Index = () => {
       setWorkflowBusy(false);
       toast.error("Failed to run video workflow");
     }
-  }, [activeLayersPayload, videoSource, workspaceMode]);
+  }, [captureColorPipelineSnapshot, videoSource, workspaceMode]);
 
-  const handleCancelActiveJob = useCallback(async () => {
-    if (!jobId) {
-      return;
-    }
-
-    const cancelled = await safeTauriInvoke<VideoJobProgressResponse>("cancel_video_processing_job", { jobId });
-    if (cancelled) {
-      setJobProgress(cancelled);
-      setWorkflowStatus(cancelled.message ?? "Cancellation requested");
-      toast.success("Cancellation requested");
-    }
-  }, [jobId]);
+  const { handleCancelActiveJob } = useVideoJobLifecycle({
+    jobId,
+    jobKind,
+    setJobId,
+    setJobProgress,
+    setJobOutputPath,
+    setWorkflowBusy,
+    setWorkflowStatus,
+    setStatus,
+  });
 
   useEffect(() => {
     if (workspaceMode === "video" || workspaceMode === "animation") {
@@ -1629,59 +1851,6 @@ const Index = () => {
         console.error("Failed to load selected video preview frame", error);
       });
   }, [selectedVideoPreviewFrame, videoPreviewFrames, workspaceMode]);
-
-  useEffect(() => {
-    if (!jobId) {
-      jobPollMissesRef.current = 0;
-      return;
-    }
-
-    const poll = async () => {
-      const nextProgress = await safeTauriInvoke<VideoJobProgressResponse>("get_video_processing_progress", { jobId });
-      if (!nextProgress) {
-        jobPollMissesRef.current += 1;
-        if (jobPollMissesRef.current >= 10) {
-          setWorkflowBusy(false);
-          setWorkflowStatus("Lost backend progress channel. Check Tauri process/logs and retry render.");
-          setStatus("Backend progress unavailable");
-          toast.error("Lost render progress channel (backend unavailable)");
-          setJobId(null);
-        }
-        return;
-      }
-
-      jobPollMissesRef.current = 0;
-
-      setJobProgress(nextProgress);
-      setWorkflowStatus(nextProgress.message ?? `${nextProgress.status} ${nextProgress.current_frame}/${nextProgress.total_frames}`);
-
-      if (nextProgress.output_path) {
-        setJobOutputPath(nextProgress.output_path);
-      }
-
-      if (["completed", "failed", "cancelled"].includes(nextProgress.status)) {
-        setStatus(
-          nextProgress.status === "completed"
-            ? `${jobKind === "video" ? "Video" : "Animation"} backend render complete`
-            : `${jobKind === "video" ? "Video" : "Animation"} backend render ${nextProgress.status}`,
-        );
-
-        if (nextProgress.status === "failed") {
-          toast.error(nextProgress.message ?? "Backend render failed");
-        }
-
-        setWorkflowBusy(false);
-        setJobId(null);
-      }
-    };
-
-    void poll();
-    const timer = window.setInterval(() => {
-      void poll();
-    }, 1000);
-
-    return () => window.clearInterval(timer);
-  }, [jobId, jobKind]);
 
   // ── Auto-populate filmstrip when image is loaded in animation mode ───────
   useEffect(() => {
@@ -1795,200 +1964,89 @@ const Index = () => {
     setHasUnsavedChanges(true);
   }, []);
 
-  // Save current processed image as PNG (was the old "Save")
-  const handleExportImage = useCallback(() => {
-    const imageToSave = processedImage || originalImage;
+  const renderFreshExportImage = useCallback(async (): Promise<HTMLImageElement | null> => {
+    return measureBudget("export", async () => {
+      if (!originalImage) {
+        return processedImage || null;
+      }
+      const colorSnapshot = captureColorPipelineSnapshot();
+
+      const frame = await imageToRgbaFrame(originalImage);
+      const imageData = new ImageData(
+        new Uint8ClampedArray(frame.rgba),
+        frame.width,
+        frame.height,
+      );
+      const { buffer, width, height } = await processImage(imageData, colorSnapshot.layersPayload);
+      const rendered = new Uint8ClampedArray(buffer);
+      const exportBytes = cmykSoftProof ? applyCmykSoftProof(rendered) : rendered;
+      return rgbaToImage(exportBytes, width, height);
+    });
+  }, [captureColorPipelineSnapshot, cmykSoftProof, measureBudget, originalImage, processImage, processedImage]);
+
+  // Save current image as PNG from a fresh payload render.
+  const handleExportImage = useCallback(async () => {
+    const imageToSave = await renderFreshExportImage();
     if (!imageToSave) {
       toast.error("No image to export!");
       return;
     }
-    const canvas = document.createElement('canvas');
+
+    const canvas = document.createElement("canvas");
     canvas.width = imageToSave.width;
     canvas.height = imageToSave.height;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext("2d");
     if (ctx) {
       ctx.drawImage(imageToSave, 0, 0);
-      canvas.toBlob((blob) => {
-        if (blob) {
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `dithered_${Date.now()}.png`;
-          a.click();
-          URL.revokeObjectURL(url);
-        }
-      });
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+      if (!blob) {
+        toast.error("Failed to encode PNG");
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `dithered_${Date.now()}.png`;
+      a.click();
+      URL.revokeObjectURL(url);
     }
-  }, [originalImage, processedImage]);
+  }, [renderFreshExportImage]);
 
-  // Save / Open project (.dyproj) ─────────────────────────────────────────
-  const newProject = useProjectStore((s) => s.newProject);
-  const loadProject = useProjectStore((s) => s.loadProject);
-  const updateManifest = useProjectStore((s) => s.updateManifest);
-  const projectManifest = useProjectStore((s) => s.manifest);
-
-  const handleNewProject = useCallback(() => {
-    newProject("Untitled Project");
-    const defaultLayer = createDefaultLayer("Layer 1");
-    setSourceImageFile(null);
-    setVideoSource(null);
-    setVideoMetadata(null);
-    setVideoPreviewFrames([]);
-    setSelectedVideoPreviewFrame(0);
-    setOriginalImage(null);
-    setProcessedImage(null);
-    setShowOriginal(true);
-    setFrames([]);
-    setSelectedFrameIndex(0);
-    setPlaybackFrameIndex(0);
-    setSelectedFrameIds(new Set());
-    setLayers([defaultLayer]);
-    setActiveLayerId(defaultLayer.id);
-    applyEffectParams(DEFAULT_FRAME_SETTINGS);
-    setWorkspaceMode("image");
-    setStatus("New project created");
-    setWorkflowStatus(undefined);
-    setJobId(null);
-    setJobKind(null);
-    setJobProgress(null);
-    setJobOutputPath(null);
-    setWorkflowBusy(false);
-    setHasUnsavedChanges(true);
-  }, [applyEffectParams, newProject]);
-
-  const handleSaveProject = useCallback(async (): Promise<boolean> => {
-    try {
-      const committedLayers = commitControlsToActiveEffect() ?? cloneLayers(layersRef.current);
-      const framesForSave = framesRef.current.map((frame, index) => (
-        index === selectedFrameIndex
-          ? {
-              ...frame,
-              layers: cloneLayers(committedLayers),
-              activeLayerId: activeLayerIdRef.current,
-              isKeyframe: true,
-            }
-          : frame
-      ));
-      const timelineData = encodeFilmstripProjectData({
-        version: 1,
-        frames: framesForSave,
-        selectedFrameIndex,
-        selectedFrameIds: Array.from(selectedFrameIds),
-      });
-
-      // Ensure a manifest exists — create one if this is the first save.
-      if (!projectManifest) {
-        const name = originalImage
-          ? (sourceImageFile?.name.replace(/\.[^.]+$/, "") ?? "Untitled Project")
-          : "Untitled Project";
-        newProject(name);
-      }
-
-      // Persist currently loaded source image as a manifest asset (for project reopen).
-      // Works both for real files (native path exists) and in-memory images (canvas fallback).
-      if (originalImage) {
-        const existingImageAsset = useProjectStore.getState().manifest?.assets.find((a) => a.assetType === "image" && !a.offline);
-        const nativeImagePath = getNativeFilePath(sourceImageFile) ?? existingImageAsset?.originalPath ?? null;
-        let stagedPath: string | null = nativeImagePath;
-        let storageMode: "external" | "embedded" = nativeImagePath ? (sourceImageFile ? "external" : "embedded") : "embedded";
-        let imageBytes: number[] | null = null;
-        const imageName = sourceImageFile?.name ?? "source-image.png";
-
-        if (!stagedPath) {
-          if (sourceImageFile) {
-            imageBytes = Array.from(new Uint8Array(await sourceImageFile.arrayBuffer()));
-          } else {
-            const canvas = document.createElement("canvas");
-            canvas.width = originalImage.naturalWidth || originalImage.width;
-            canvas.height = originalImage.naturalHeight || originalImage.height;
-            const ctx = canvas.getContext("2d");
-            if (!ctx) {
-              throw new Error("Failed to create canvas context for source image staging");
-            }
-            ctx.drawImage(originalImage, 0, 0, canvas.width, canvas.height);
-            const blob = await new Promise<Blob | null>((resolve) => {
-              canvas.toBlob(resolve, "image/png");
-            });
-            if (!blob) {
-              throw new Error("Failed to encode source image for project save");
-            }
-            imageBytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
-          }
-
-          const extension = imageName.split(".").pop()?.toLowerCase() || "png";
-          const tmpPath = `/tmp/dither-yuki/staging/source-${crypto.randomUUID()}.${extension}`;
-          const writePath = await safeTauriInvoke<string>("save_bytes_to_path", {
-            filePath: tmpPath,
-            bytes: imageBytes,
-          });
-          if (!writePath) {
-            throw new Error("Failed to stage source image for project save");
-          }
-          stagedPath = writePath;
-          storageMode = "embedded";
-        }
-
-        updateManifest((m) => {
-          const existingImageAsset = m.assets.find((a) => a.assetType === "image");
-          const imageAssetId = existingImageAsset?.id ?? `image-${crypto.randomUUID()}`;
-          const imageSize = sourceImageFile?.size ?? imageBytes?.length ?? existingImageAsset?.sizeBytes ?? 0;
-          const filtered = m.assets.filter((a) => a.id !== imageAssetId && a.assetType !== "image");
-          const customPaletteColors = customColors
-            .map(hexToRgb)
-            .filter((color): color is [number, number, number] => color !== null);
-
-          return {
-            ...m,
-            palettes: palette === "Custom" && customPaletteColors.length > 0
-              ? [{
-                  id: "custom-palette",
-                  name: "Custom",
-                  colors: customPaletteColors,
-                }]
-              : [],
-            assets: [
-              {
-                id: imageAssetId,
-                name: imageName || existingImageAsset?.name || "source-image.png",
-                assetType: "image",
-                storage: storageMode,
-                originalPath: stagedPath,
-                hash: null,
-                sizeBytes: imageSize,
-                offline: false,
-              },
-              ...filtered,
-            ],
-          };
-        });
-      }
-
-      // Re-read filePath from store after potential newProject() call.
-      const existingPath = useProjectStore.getState().filePath;
-      const path = existingPath ?? await pickSaveProjectPath(
-        projectManifest?.name
-          ? `${projectManifest.name}.dyproj`
-          : `${sourceImageFile?.name.replace(/\.[^.]+$/, "") ?? "project"}.dyproj`,
-      );
-      if (!path) {
-        // User cancelled the dialog
-        return false;
-      }
-      const normalizedPath = path.toLowerCase().endsWith(".dyproj") ? path : `${path}.dyproj`;
-      const saveResult = await useProjectStore.getState().saveProject(normalizedPath, timelineData);
-      if (saveResult === null) {
-        throw new Error("save_project returned empty result");
-      }
-      toast.success(`Project saved: ${normalizedPath.split("/").pop()}`);
-      setStatus("Project saved");
-      setHasUnsavedChanges(false);
-      return true;
-    } catch (err) {
-      console.error("Save project failed", err);
-      toast.error(`Failed to save project: ${err instanceof Error ? err.message : String(err)}`);
-      return false;
-    }
-  }, [activeLayerIdRef, commitControlsToActiveEffect, framesRef, layersRef, newProject, originalImage, projectManifest, selectedFrameIds, selectedFrameIndex, sourceImageFile, updateManifest]);
+  // Project save/load ───────────────────────────────────────────────────────
+  const { handleNewProject, handleSaveProject, handleOpenProject } = useProjectHydrator({
+    originalImage,
+    sourceImageFile,
+    videoSource,
+    framesRef,
+    selectedFrameIndex,
+    selectedFrameIds,
+    layersRef,
+    activeLayerIdRef,
+    setOriginalImage,
+    setProcessedImage,
+    setShowOriginal,
+    setImageSize,
+    setSourceImageFile,
+    setVideoSource,
+    setVideoMetadata,
+    setVideoPreviewFrames,
+    setSelectedVideoPreviewFrame,
+    setFrames,
+    setSelectedFrameIndex,
+    setSelectedFrameIds,
+    setLayers,
+    setActiveLayerId,
+    setWorkspaceMode,
+    setStatus,
+    setCustomColors,
+    setPaletteOptions,
+    setPalette,
+    applyLayerSnapshotToControls,
+    applyEffectParams,
+    markProjectDirty: () => setHasUnsavedChanges(true),
+    clearProjectDirty: () => setHasUnsavedChanges(false),
+    setCustomPalette,
+  });
 
   useEffect(() => {
     if (!backendConnected) {
@@ -2048,171 +2106,41 @@ const Index = () => {
     setShowExitWarning(false);
   }, []);
 
-  const handleOpenProject = useCallback(async () => {
-    try {
-      const path = await pickOpenProjectPath();
-      if (!path) return;
-      const result = await loadProject(path);
-      toast.success(`Project opened: ${path.split("/").pop()}`);
-      if (result.offlineAssets.length) {
-        toast.warning(`${result.offlineAssets.length} asset(s) could not be relinked`);
-      }
-      setHasUnsavedChanges(false);
-
-      const loadedManifest = useProjectStore.getState().manifest;
-      const imageAsset = loadedManifest?.assets.find((a) => a.assetType === "image" && !a.offline)
-        ?? loadedManifest?.assets.find((a) => !a.offline && /\.(png|jpe?g|gif|webp|bmp)$/i.test(a.name));
-      const filmstrip = decodeFilmstripProjectData(result.timelineData);
-      const savedCustomPalette = loadedManifest?.palettes?.find((entry) => entry.name === "Custom" || entry.id === "custom-palette")?.colors?.length
-        ? loadedManifest.palettes.find((entry) => entry.name === "Custom" || entry.id === "custom-palette")?.colors.map(([r, g, b]) => rgbToHex([r, g, b]))
-        : null;
-
-      if (savedCustomPalette?.length) {
-        setCustomColors(savedCustomPalette);
-        setCustomPalette(savedCustomPalette);
-        setPaletteOptions((prev) => (prev.includes("Custom") ? prev : [...prev, "Custom"]));
-      }
-
-      const hydrateFilmstripSelection = (filmstripData: ReturnType<typeof decodeFilmstripProjectData>) => {
-        if (!filmstripData?.frames.length) {
-          return false;
-        }
-
-        const selectedIndex = Math.max(0, Math.min(filmstripData.selectedFrameIndex, filmstripData.frames.length - 1));
-        const selectedFrame = filmstripData.frames[selectedIndex] ?? filmstripData.frames[0];
-        const selectedFrameId = selectedFrame?.id;
-        const selectedLayerId = selectedFrame?.activeLayerId ?? selectedFrame?.layers[0]?.id ?? "";
-        const selectedLayer = selectedFrame?.layers.find((layer) => layer.id === selectedLayerId) ?? selectedFrame?.layers[0] ?? null;
-
-        setFrames(filmstripData.frames);
-        setSelectedFrameIndex(selectedIndex);
-        setSelectedFrameIds(new Set(filmstripData.selectedFrameIds.length ? filmstripData.selectedFrameIds : selectedFrameId ? [selectedFrameId] : []));
-        setLayers(selectedFrame ? cloneLayers(selectedFrame.layers) : [createDefaultLayer("Layer 1")]);
-        setActiveLayerId(selectedLayerId);
-        applyLayerSnapshotToControls(selectedLayer);
-        setWorkspaceMode("animation");
-        setStatus("Project loaded with filmstrip");
-        return true;
-      };
-
-      if (imageAsset) {
-        try {
-          const restored = imageAsset.originalPath
-            ? await loadImageFromPath(imageAsset.originalPath)
-            : null;
-          if (!restored) {
-            throw new Error("No valid source image path available");
-          }
-          setOriginalImage(restored);
-          setProcessedImage(null);
-          setShowOriginal(true);
-          setImageSize(`${restored.width}×${restored.height}`);
-          if (!hydrateFilmstripSelection(filmstrip)) {
-            setWorkspaceMode("image");
-            setStatus("Project loaded");
-          }
-        } catch (imageErr) {
-          if (imageAsset.originalPath) {
-            try {
-              const restored = await loadImageFromPath(imageAsset.originalPath);
-              setOriginalImage(restored);
-              setProcessedImage(null);
-              setShowOriginal(true);
-              setImageSize(`${restored.width}×${restored.height}`);
-              if (!hydrateFilmstripSelection(filmstrip)) {
-                setWorkspaceMode("image");
-                setStatus("Project loaded");
-              }
-              return;
-            } catch (fallbackErr) {
-              console.error("Project opened, but image restore failed", imageErr, fallbackErr);
-            }
-          } else {
-            console.error("Project opened, but image restore failed", imageErr);
-          }
-          toast.warning("Project opened, but source image could not be restored");
-          setStatus("Project loaded (image unavailable)");
-        }
-      } else {
-        if (!hydrateFilmstripSelection(filmstrip)) {
-          setStatus("Project loaded (no source image asset)");
-        }
-      }
-    } catch (err) {
-      console.error("Open project failed", err);
-      toast.error("Failed to open project");
-    }
-  }, [loadProject]);
-
   const handleExport = useCallback(() => {
-    handleExportImage();
+    void handleExportImage();
   }, [handleExportImage]);
 
-  const handleExtractPaletteFromCurrentImage = useCallback(async (): Promise<string[] | null> => {
-    const imageSource = processedImage || originalImage;
-    if (!imageSource) {
-      toast.error("Load an image first");
-      return null;
-    }
-
-    setQuantizingPalette(true);
-    setStatus("Extracting palette...");
-
-    try {
-      const canvas = document.createElement("canvas");
-      canvas.width = 256;
-      canvas.height = 256;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
-        throw new Error("Failed to create canvas context for quantization");
-      }
-
-      ctx.imageSmoothingEnabled = true;
-      ctx.drawImage(imageSource, 0, 0, 256, 256);
-      const imageData = ctx.getImageData(0, 0, 256, 256);
-
-      const backendExtracted = await safeTauriInvoke<[number, number, number][]>("extract_palette", {
-        image_bytes: Array.from(imageData.data),
-        color_count: quantizationColorCount,
-        method: quantizationMethod,
-      });
-
-      const extracted = backendExtracted?.length
-        ? backendExtracted
-        : extractPaletteLocal(imageData.data, quantizationColorCount, quantizationMethod);
-
-      if (!extracted.length) {
-        toast.error("Palette extraction failed in this runtime");
-        setStatus("Palette extraction unavailable");
-        return null;
-      }
-
-      const hexColors = extracted.map(rgbToHex);
-
-      setCustomColors(hexColors);
-      setCustomPalette(hexColors);
-      setPaletteOptions((prev) => (prev.includes("Custom") ? prev : [...prev, "Custom"]));
-      setPalette("Custom");
-
-      if (backendExtracted?.length) {
-        toast.success(`Extracted ${hexColors.length} colors`);
-      } else {
-        toast.success(`Extracted ${hexColors.length} colors (local fallback)`);
-      }
-      setStatus("Palette extracted");
-      return hexColors;
-    } catch (error) {
-      console.error("Auto-quantization failed", error);
-      toast.error("Failed to extract palette");
-      setStatus("Palette extraction error");
-      return null;
-    } finally {
-      setQuantizingPalette(false);
-    }
-  }, [originalImage, processedImage, quantizationColorCount, quantizationMethod]);
+  const {
+    handleExtractPaletteFromCurrentImage,
+    handleExtractPaletteFromOriginalImage,
+    handleSavePalette,
+    handleImportPaletteFile,
+    handleExportPaletteFile,
+    handlePaletteReorder,
+    handlePaletteColorEdit,
+  } = usePaletteWorkflow({
+    isActiveLayerLocked,
+    palette,
+    customColors,
+    quantizationColorCount,
+    quantizationMethod,
+    originalImage,
+    processedImage,
+    setStatus,
+    setQuantizingPalette,
+    setPalette,
+    setPaletteOptions,
+    setCustomColors,
+    setHasUnsavedChanges,
+    setShowColorStudio,
+    setCustomPalette,
+    rgbToHex,
+    hexToRgb,
+    extractPaletteLocal,
+  });
 
   const handleExportSvg = useCallback(async () => {
-    const imageToSave = processedImage || originalImage;
+    const imageToSave = await renderFreshExportImage();
     if (!imageToSave) {
       toast.error("No image to export!");
       return;
@@ -2248,7 +2176,7 @@ const Index = () => {
       console.error("SVG export failed", error);
       toast.error("Failed to export SVG");
     }
-  }, [originalImage, processedImage]);
+  }, [renderFreshExportImage]);
 
   const handleLoadPreset = (preset: PresetPayload) => {
     const normalizedAlgorithm = normalizeDitheringAlgorithm(preset.settings.algorithm);
@@ -2423,54 +2351,6 @@ const Index = () => {
     }
   }, [applyImportedPatternPreset]);
 
-  const handleSavePalette = (colors: string[]) => {
-    setCustomColors(colors);
-    setCustomPalette(colors);
-    setPalette("Custom");
-    setShowColorStudio(false);
-    setHasUnsavedChanges(true);
-  };
-
-  const handlePaletteReorder = useCallback((fromIndex: number, toIndex: number) => {
-    if (palette !== "Custom") {
-      return;
-    }
-
-    setCustomColors((prev) => {
-      if (fromIndex < 0 || toIndex < 0 || fromIndex >= prev.length || toIndex >= prev.length) {
-        return prev;
-      }
-      const next = [...prev];
-      const [moved] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, moved);
-      setCustomPalette(next);
-      setHasUnsavedChanges(true);
-      return next;
-    });
-  }, [palette]);
-
-  const handlePaletteColorEdit = useCallback((index: number, hex: string) => {
-    if (palette !== "Custom") {
-      return;
-    }
-
-    const normalized = hex.startsWith("#") ? hex : `#${hex}`;
-    if (!/^#[0-9a-fA-F]{6}$/.test(normalized)) {
-      toast.error("Use HEX format like #A1B2C3");
-      return;
-    }
-
-    setCustomColors((prev) => {
-      if (index < 0 || index >= prev.length) {
-        return prev;
-      }
-      const next = [...prev];
-      next[index] = normalized.toUpperCase();
-      setCustomPalette(next);
-      setHasUnsavedChanges(true);
-      return next;
-    });
-  }, [palette]);
 
   // Global keyboard shortcuts (Photoshop-like)
   useEffect(() => {
@@ -2697,7 +2577,7 @@ const Index = () => {
             onImportPreset={handleImportPatternPreset}
             onManagePresets={() => setShowPresetManager(true)}
             backendConnected={backendConnected}
-            workspaceMode={workspaceMode}
+            workspaceMode={viewState.workspaceMode}
           />
         )}
 
@@ -2705,8 +2585,8 @@ const Index = () => {
           onToggleFocusMode={() => setFocusMode((prev) => !prev)}
           onSelectWorkspaceMode={handleToolbarWorkspaceSelect}
           onOpenColorStudio={() => setShowColorStudio(true)}
-          workspaceMode={workspaceMode}
-          focusMode={focusMode}
+          workspaceMode={viewState.workspaceMode}
+          focusMode={viewState.focusMode}
           leftPanelVisible={leftPanelVisible}
         />
 
@@ -2726,8 +2606,8 @@ const Index = () => {
             )}
 
             <WorkspaceMain
-              focusMode={focusMode}
-              workspaceMode={workspaceMode}
+              focusMode={viewState.focusMode}
+              workspaceMode={viewState.workspaceMode}
               originalImage={originalImage}
               processedImage={processedImage}
               showOriginal={showOriginal}
@@ -2748,19 +2628,16 @@ const Index = () => {
               onAddFrame={handleAddFrameClone}
               onImportFrame={handleImportAnimationFrame}
               onDeleteSelectedFrame={handleDeleteSelectedFrame}
-              onApplyEffectToSelectedFrame={handleApplyEffectToSelectedFrame}
               onApplyToSelected={handleApplyToSelected}
-              onInterpolateSelected={handleInterpolateSelected}
               onRenderAnimation={handleExportAnimation}
-              onToggleKeyframe={handleToggleKeyframe}
               videoPreviewFrames={videoPreviewFrames}
               selectedVideoPreviewFrame={selectedVideoPreviewFrame}
               setSelectedVideoPreviewFrame={setSelectedVideoPreviewFrame}
-              workflowBusy={workflowBusy}
+              workflowBusy={transientState.workflowBusy}
               videoSource={videoSource}
               canRenderVideo={canRenderVideo}
               videoRenderBlockedReason={videoRenderBlockedReason}
-              videoPreviewBusy={videoPreviewBusy}
+              videoPreviewBusy={transientState.videoPreviewBusy}
               videoMetadata={videoMetadata}
               onRunVideoWorkflow={handleRunVideoWorkflow}
             />
@@ -2768,217 +2645,197 @@ const Index = () => {
             {!focusMode && (
               <aside className="min-h-0 overflow-hidden">
                 <div className="flex h-full min-h-0 flex-col gap-2 overflow-hidden">
-                  <InspectorWindow title="Inspector" subtitle="controls">
+                  <InspectorWindow title="Inspector">
                     <ControlPanel
+                      isReadOnly={isActiveLayerLocked()}
                       algorithm={algorithm}
                       algorithmOptions={algorithmOptions}
                       setAlgorithm={(v: string) => {
-                        setAlgorithm(v as DitheringAlgorithm);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setAlgorithm(v as DitheringAlgorithm));
                       }}
                       palette={palette}
                       paletteOptions={paletteOptions}
                       setPalette={(v: string) => {
-                        setPalette(v as ColorPalette);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setPalette(v as ColorPalette));
                       }}
                       intensity={intensity}
                       setIntensity={(value) => {
-                        setIntensity(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setIntensity(value));
                       }}
                       contrast={contrast}
                       setContrast={(value) => {
-                        setContrast(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setContrast(value));
                       }}
                       brightness={brightness}
                       setBrightness={(value) => {
-                        setBrightness(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setBrightness(value));
                       }}
                       saturation={saturation}
                       setSaturation={(value) => {
-                        setSaturation(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setSaturation(value));
                       }}
                       pixelSize={pixelSize}
                       setPixelSize={(value) => {
-                        setPixelSize(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setPixelSize(value));
                       }}
                       blur={blur}
                       setBlur={(value) => {
-                        setBlur(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setBlur(value));
                       }}
                       sharpness={sharpness}
                       setSharpness={(value) => {
-                        setSharpness(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setSharpness(value));
                       }}
                       noise={noise}
                       setNoise={(value) => {
-                        setNoise(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setNoise(value));
                       }}
                       blendMode={blendMode}
                       setBlendMode={(value) => {
-                        setBlendMode(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setBlendMode(value));
                       }}
                       layerOpacity={layerOpacity}
                       setLayerOpacity={(value) => {
-                        setLayerOpacity(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setLayerOpacity(value));
                       }}
-                      paletteSwatches={paletteSwatches}
+                      paletteSwatches={domainState.paletteSwatches}
                       onPaletteReorder={handlePaletteReorder}
                       onPaletteColorEdit={handlePaletteColorEdit}
                       snapGlitchToPalette={snapGlitchToPalette}
                       setSnapGlitchToPalette={(value) => {
-                        setSnapGlitchToPalette(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setSnapGlitchToPalette(value));
                       }}
                       paletteMix={paletteMix}
                       setPaletteMix={(value) => {
-                        setPaletteMix(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setPaletteMix(value));
                       }}
                       globalSeed={globalSeed}
                       setGlobalSeed={(value) => {
-                        setGlobalSeed(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setGlobalSeed(value));
                       }}
                       glitchType={glitchType}
                       setGlitchType={(value) => {
-                        setGlitchType(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setGlitchType(value));
                       }}
                       pixelSortMetric={pixelSortMetric}
                       setPixelSortMetric={(value) => {
-                        setPixelSortMetric(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setPixelSortMetric(value));
                       }}
                       pixelSortMask={pixelSortMask}
                       setPixelSortMask={(value) => {
-                        setPixelSortMask(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setPixelSortMask(value));
                       }}
                       thresholdMin={thresholdMin}
                       setThresholdMin={(value) => {
-                        setThresholdMin(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setThresholdMin(value));
                       }}
                       thresholdMax={thresholdMax}
                       setThresholdMax={(value) => {
-                        setThresholdMax(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setThresholdMax(value));
                       }}
                       angle={angle}
                       setAngle={(value) => {
-                        setAngle(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setAngle(value));
                       }}
                       sortLength={sortLength}
                       setSortLength={(value) => {
-                        setSortLength(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setSortLength(value));
                       }}
                       blockSize={blockSize}
                       setBlockSize={(value) => {
-                        setBlockSize(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setBlockSize(value));
                       }}
                       chaos={chaos}
                       setChaos={(value) => {
-                        setChaos(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setChaos(value));
                       }}
                       quantization={quantization}
                       setQuantization={(value) => {
-                        setQuantization(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setQuantization(value));
                       }}
                       redShiftX={redShiftX}
                       setRedShiftX={(value) => {
-                        setRedShiftX(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setRedShiftX(value));
                       }}
                       redShiftY={redShiftY}
                       setRedShiftY={(value) => {
-                        setRedShiftY(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setRedShiftY(value));
                       }}
                       greenShiftX={greenShiftX}
                       setGreenShiftX={(value) => {
-                        setGreenShiftX(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setGreenShiftX(value));
                       }}
                       greenShiftY={greenShiftY}
                       setGreenShiftY={(value) => {
-                        setGreenShiftY(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setGreenShiftY(value));
                       }}
                       blueShiftX={blueShiftX}
                       setBlueShiftX={(value) => {
-                        setBlueShiftX(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setBlueShiftX(value));
                       }}
                       blueShiftY={blueShiftY}
                       setBlueShiftY={(value) => {
-                        setBlueShiftY(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setBlueShiftY(value));
                       }}
                       globalRgbShiftIntensity={globalRgbShiftIntensity}
                       setGlobalRgbShiftIntensity={(value) => {
-                        setGlobalRgbShiftIntensity(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setGlobalRgbShiftIntensity(value));
                       }}
                       sliceCount={sliceCount}
                       setSliceCount={(value) => {
-                        setSliceCount(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setSliceCount(value));
                       }}
                       maxOffset={maxOffset}
                       setMaxOffset={(value) => {
-                        setMaxOffset(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setMaxOffset(value));
                       }}
                       randomness={randomness}
                       setRandomness={(value) => {
-                        setRandomness(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setRandomness(value));
                       }}
                       scanlineThickness={scanlineThickness}
                       setScanlineThickness={(value) => {
-                        setScanlineThickness(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setScanlineThickness(value));
                       }}
                       scanlineGap={scanlineGap}
                       setScanlineGap={(value) => {
-                        setScanlineGap(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setScanlineGap(value));
                       }}
                       flicker={flicker}
                       setFlicker={(value) => {
-                        setFlicker(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setFlicker(value));
                       }}
                       curvature={curvature}
                       setCurvature={(value) => {
-                        setCurvature(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setCurvature(value));
                       }}
                       maskTarget={maskTarget}
                       setMaskTarget={(value) => {
-                        setMaskTarget(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setMaskTarget(value));
                       }}
                       maskFeather={maskFeather}
                       setMaskFeather={(value) => {
-                        setMaskFeather(value);
-                        markProjectDirty();
+                        updateActiveLayerControl(() => setMaskFeather(value));
+                      }}
+                      cmykSoftProof={cmykSoftProof}
+                      setCmykSoftProof={(value) => {
+                        setCmykSoftProof(value);
+                      }}
+                      maskR={maskR}
+                      setMaskR={(value) => {
+                        updateActiveLayerControl(() => setMaskR(value));
+                      }}
+                      maskG={maskG}
+                      setMaskG={(value) => {
+                        updateActiveLayerControl(() => setMaskG(value));
+                      }}
+                      maskB={maskB}
+                      setMaskB={(value) => {
+                        updateActiveLayerControl(() => setMaskB(value));
+                      }}
+                      maskA={maskA}
+                      setMaskA={(value) => {
+                        updateActiveLayerControl(() => setMaskA(value));
                       }}
                     />
                   </InspectorWindow>
@@ -2990,27 +2847,14 @@ const Index = () => {
 
         {!focusMode && (
           <AppFooterBars
-            focusMode={focusMode}
-            workspaceMode={workspaceMode}
-            originalImagePresent={Boolean(originalImage)}
-            videoSourcePresent={Boolean(videoSource)}
+            focusMode={viewState.focusMode}
+            workspaceMode={viewState.workspaceMode}
             backendConnected={backendConnected}
             imageSize={imageSize}
-            currentSourceLabel={currentSourceLabel}
-            videoMetadata={videoMetadata}
-            activeAdjustments={activeAdjustments}
-            algorithm={algorithm}
-            palette={palette}
-            workflowBusy={workflowBusy}
             workflowStatus={workflowStatus}
             jobProgressText={jobProgressText}
-            jobOutputPath={jobOutputPath}
-            canRenderVideo={canRenderVideo}
-            videoRenderBlockedReason={videoRenderBlockedReason}
             status={status}
-            onRunVideoWorkflow={handleRunVideoWorkflow}
-            onExportSvg={handleExportSvg}
-            onCancelActiveJob={handleCancelActiveJob}
+            previewQualityLabel={transientState.previewQuality === "accurate" ? "Accurate" : "Fast"}
           />
         )}
       </div>
@@ -3020,14 +2864,18 @@ const Index = () => {
       <AppOverlays
         showColorStudio={showColorStudio}
         onCloseColorStudio={() => setShowColorStudio(false)}
-        customColors={customColors}
+        activePaletteColors={domainState.paletteSwatches}
         quantizationMethod={quantizationMethod}
         setQuantizationMethod={setQuantizationMethod}
         quantizationColorCount={quantizationColorCount}
         setQuantizationColorCount={setQuantizationColorCount}
         canAutoQuantize={Boolean(originalImage || processedImage)}
+        canExtractFromOriginal={Boolean(originalImage)}
         quantizingPalette={quantizingPalette}
         onExtractFromImage={handleExtractPaletteFromCurrentImage}
+        onExtractFromOriginal={handleExtractPaletteFromOriginalImage}
+        onImportPalette={handleImportPaletteFile}
+        onExportPalette={handleExportPaletteFile}
         onSavePalette={handleSavePalette}
         showAbout={showAbout}
         onCloseAbout={() => setShowAbout(false)}
@@ -3053,7 +2901,7 @@ const Index = () => {
         onSaveAndExit={handleSaveAndExit}
         onDiscardAndExit={handleDiscardAndExit}
         onCancelExitWarning={handleCancelExitWarning}
-        workflowBusy={workflowBusy}
+        workflowBusy={transientState.workflowBusy}
         jobId={jobId}
         jobKind={jobKind}
         workflowStatus={workflowStatus}

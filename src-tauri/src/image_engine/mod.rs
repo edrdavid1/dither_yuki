@@ -12,6 +12,8 @@ pub mod special;
 pub mod presets;
 pub mod color;
 pub mod video;
+pub mod channel_mask;
+pub mod channel_ops;
 
 pub use types::{Effect, ImageData, EffectParams, EffectResult};
 pub use context::FrameContext;
@@ -48,7 +50,7 @@ pub use color::{
 };
 pub use video::{
     export_frames_pack, list_temporal_variation_modes, prepare_video_layers, process_frame_batch,
-    ChannelMask,
+    ChannelMask as VideoChannelMask,
     process_frame_batch_packed,
     process_single_video_frame, process_single_video_frame_with_animation, reorder_layers,
     render_still_image_animation, list_animation_easing_modes,
@@ -56,6 +58,12 @@ pub use video::{
     AnimationTrack, EffectLayer, PreparedVideoLayers, StillImageAnimationRequest,
     StillImageAnimationResult, TemporalVariationConfig, VideoFrameBatchPackedRequest,
     VideoFrameBatchPackedResult, VideoFrameBatchRequest, VideoFrameBatchResult,
+};
+pub use channel_mask::{
+    ChannelMask, apply_channel_mask_to_buffer, apply_channel_mask_to_image,
+};
+pub use channel_ops::{
+    Channel, ChannelInvert, ChannelScale, ChannelCopy, ChannelSwap,
 };
 
 struct NoDither;
@@ -193,6 +201,25 @@ impl AlgorithmRegistry {
             "Epsilon Glow" => Ok(Box::new(EpsilonGlow { palette, intensity })),
             "Subpixel Layout" => Ok(Box::new(SubpixelLayout { palette, intensity })),
             "Scanlines with Softness" => Ok(Box::new(ScanlinesWithSoftness { palette, intensity })),
+            "Channel Mask" => Ok(Box::new(ChannelMask::all_visible())),
+            // Channel operations
+            "Invert Red" => Ok(Box::new(ChannelInvert::new(Channel::Red))),
+            "Invert Green" => Ok(Box::new(ChannelInvert::new(Channel::Green))),
+            "Invert Blue" => Ok(Box::new(ChannelInvert::new(Channel::Blue))),
+            "Invert Alpha" => Ok(Box::new(ChannelInvert::new(Channel::Alpha))),
+            "Scale Red" => Ok(Box::new(ChannelScale::new(Channel::Red, intensity / 100.0 * 2.0))),
+            "Scale Green" => Ok(Box::new(ChannelScale::new(Channel::Green, intensity / 100.0 * 2.0))),
+            "Scale Blue" => Ok(Box::new(ChannelScale::new(Channel::Blue, intensity / 100.0 * 2.0))),
+            "Scale Alpha" => Ok(Box::new(ChannelScale::new(Channel::Alpha, intensity / 100.0 * 2.0))),
+            "Copy Red to Green" => Ok(Box::new(ChannelCopy::new(Channel::Red, Channel::Green))),
+            "Copy Red to Blue" => Ok(Box::new(ChannelCopy::new(Channel::Red, Channel::Blue))),
+            "Copy Green to Red" => Ok(Box::new(ChannelCopy::new(Channel::Green, Channel::Red))),
+            "Copy Green to Blue" => Ok(Box::new(ChannelCopy::new(Channel::Green, Channel::Blue))),
+            "Copy Blue to Red" => Ok(Box::new(ChannelCopy::new(Channel::Blue, Channel::Red))),
+            "Copy Blue to Green" => Ok(Box::new(ChannelCopy::new(Channel::Blue, Channel::Green))),
+            "Swap Red/Green" => Ok(Box::new(ChannelSwap::new(Channel::Red, Channel::Green))),
+            "Swap Red/Blue" => Ok(Box::new(ChannelSwap::new(Channel::Red, Channel::Blue))),
+            "Swap Green/Blue" => Ok(Box::new(ChannelSwap::new(Channel::Green, Channel::Blue))),
             _ => Err(format!("Unknown algorithm: {}", algorithm)),
         }
     }
@@ -264,6 +291,25 @@ impl AlgorithmRegistry {
             "Epsilon Glow",
             "Subpixel Layout",
             "Scanlines with Softness",
+            "Channel Mask",
+            // Channel operations
+            "Invert Red",
+            "Invert Green",
+            "Invert Blue",
+            "Invert Alpha",
+            "Scale Red",
+            "Scale Green",
+            "Scale Blue",
+            "Scale Alpha",
+            "Copy Red to Green",
+            "Copy Red to Blue",
+            "Copy Green to Red",
+            "Copy Green to Blue",
+            "Copy Blue to Red",
+            "Copy Blue to Green",
+            "Swap Red/Green",
+            "Swap Red/Blue",
+            "Swap Green/Blue",
         ]
     }
 }

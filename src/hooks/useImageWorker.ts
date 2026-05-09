@@ -16,6 +16,10 @@ import { getBackendPreview } from "@/lib/tauriBridge";
  * @param layers    - ordered EffectLayer array (built via buildEffectLayerPayloadFromValues)
  */
 export function useImageWorker() {
+  const isTauriRuntime =
+    typeof window !== "undefined" &&
+    ("__TAURI_INTERNALS__" in window || "__TAURI__" in window);
+
   const processImage = useCallback(
     async (
       imageData: ImageData,
@@ -25,13 +29,22 @@ export function useImageWorker() {
       const result = await getBackendPreview(imageData.width, imageData.height, rgbaBytes, layers);
 
       if (!result) {
-        throw new Error("Backend preview returned null — check that the Tauri backend is running");
+        if (!isTauriRuntime) {
+          // Browser localhost/dev fallback: keep UI usable without Tauri backend.
+          return {
+            buffer: new Uint8Array(imageData.data).buffer,
+            width: imageData.width,
+            height: imageData.height,
+          };
+        }
+
+        throw new Error("Backend preview returned null in Tauri runtime");
       }
 
       const outBuffer = new Uint8Array(result.rgba).buffer;
       return { buffer: outBuffer, width: result.width, height: result.height };
     },
-    [],
+    [isTauriRuntime],
   );
 
   return { processImage };

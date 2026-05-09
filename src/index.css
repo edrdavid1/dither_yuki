@@ -253,81 +253,57 @@
   }
 
   /* ── Industrial thin scrollbar ── */
-  .win98-scroll,
-  .win98-scroll-area {
-    scrollbar-width: thin;
-    scrollbar-color: #c0c0c0 #d0d0d0;
-    scrollbar-gutter: stable both-edges;
-    overflow-y: scroll;
-  }
+ /* ── Экстремально тонкие квадратные скроллбары ── */
+.win98-scroll,
+.win98-scroll-area {
+  /* Firefox – максимально тонко, что возможно нативно */
+  scrollbar-width: thin;
+  scrollbar-color: #2c2c2c ;
+  scrollbar-gutter: stable both-edges;
+  overflow-y: auto;
+}
 
-  .win98-scroll::-webkit-scrollbar,
-  .win98-scroll-area::-webkit-scrollbar {
-    width: 12px;
-    height: 12px;
-    background: #d0d0d0;
-  }
+/* WebKit-браузеры (Chrome, Edge, Safari) – толщина 3px */
+.win98-scroll::-webkit-scrollbar,
+.win98-scroll-area::-webkit-scrollbar {
+  width: 3px;
+  height: 3px;
+  background: transparent;
+}
 
-  .win98-scroll::-webkit-scrollbar-track,
-  .win98-scroll-area::-webkit-scrollbar-track {
-    background-color: #d0d0d0;
-    background-image: radial-gradient(rgba(0, 0, 0, 0.14) 0.6px, transparent 0.7px);
-    background-size: 3px 3px;
-    border: 1px solid #000;
-  }
+.win98-scroll::-webkit-scrollbar-track,
+.win98-scroll-area::-webkit-scrollbar-track {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
 
-  .win98-scroll::-webkit-scrollbar-thumb,
-  .win98-scroll-area::-webkit-scrollbar-thumb {
-    background: #c0c0c0;
-    border: 1px solid #000;
-    box-shadow: inset 1px 1px 0 #fff;
-    border-radius: 0;
-    min-height: 18px;
-    min-width: 18px;
-  }
+.win98-scroll::-webkit-scrollbar-thumb,
+.win98-scroll-area::-webkit-scrollbar-thumb {
+  background: #2c2c2c;
+  border: none;
+  border-radius: 0 !important;
+  box-shadow: none;
+  min-height: 16px;
+  min-width: 16px;
+}
 
-  .win98-scroll::-webkit-scrollbar-thumb:hover,
-  .win98-scroll-area::-webkit-scrollbar-thumb:hover {
-    background: #b9b9b9;
-  }
+.win98-scroll::-webkit-scrollbar-thumb:hover,
+.win98-scroll-area::-webkit-scrollbar-thumb:hover {
+  background: #111111;
+}
 
-  .win98-scroll::-webkit-scrollbar-button,
-  .win98-scroll-area::-webkit-scrollbar-button {
-    display: block;
-    width: 12px;
-    height: 12px;
-    background-color: #c0c0c0;
-    border: 1px solid #000;
-    box-shadow: inset 1px 1px 0 #fff;
-    background-position: center;
-    background-repeat: no-repeat;
-  }
+/* Убираем все кнопки и уголки */
+.win98-scroll::-webkit-scrollbar-button,
+.win98-scroll-area::-webkit-scrollbar-button {
+  display: none;
+}
 
-  .win98-scroll::-webkit-scrollbar-button:single-button:vertical:decrement,
-  .win98-scroll-area::-webkit-scrollbar-button:single-button:vertical:decrement {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='6' viewBox='0 0 6 6'%3E%3Cpath d='M3 1L5 4H1z' fill='black'/%3E%3C/svg%3E");
-  }
-
-  .win98-scroll::-webkit-scrollbar-button:single-button:vertical:increment,
-  .win98-scroll-area::-webkit-scrollbar-button:single-button:vertical:increment {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='6' viewBox='0 0 6 6'%3E%3Cpath d='M1 2h4L3 5z' fill='black'/%3E%3C/svg%3E");
-  }
-
-  .win98-scroll::-webkit-scrollbar-button:single-button:horizontal:decrement,
-  .win98-scroll-area::-webkit-scrollbar-button:single-button:horizontal:decrement {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='6' viewBox='0 0 6 6'%3E%3Cpath d='M1 3L4 1v4z' fill='black'/%3E%3C/svg%3E");
-  }
-
-  .win98-scroll::-webkit-scrollbar-button:single-button:horizontal:increment,
-  .win98-scroll-area::-webkit-scrollbar-button:single-button:horizontal:increment {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='6' viewBox='0 0 6 6'%3E%3Cpath d='M2 1v4l3-2z' fill='black'/%3E%3C/svg%3E");
-  }
-
-  .win98-scroll::-webkit-scrollbar-corner,
-  .win98-scroll-area::-webkit-scrollbar-corner {
-    background: #d0d0d0;
-    border: 1px solid #000;
-  }
+.win98-scroll::-webkit-scrollbar-corner,
+.win98-scroll-area::-webkit-scrollbar-corner {
+  background: #f0f0f0;
+  border: none;
+}
 
   /* ── Minimalism utilities ── */
   .retro-flat-panel {

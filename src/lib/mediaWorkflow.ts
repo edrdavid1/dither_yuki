@@ -282,7 +282,7 @@ export function rgbaToImage(rgba: Uint8ClampedArray | number[], width: number, h
     const img = new Image();
     img.onload = () => resolve(img);
     img.onerror = () => reject(new Error("Failed to convert RGBA frame to image"));
-    // JPEG encode is ~4× faster than PNG for preview frames; quality 0.85 is visually lossless at preview sizes
-    img.src = canvas.toDataURL("image/jpeg", 0.85);
+    // Use PNG to preserve exact RGBA values and avoid color/alpha shifts.
+    img.src = canvas.toDataURL("image/png");
   });
 }

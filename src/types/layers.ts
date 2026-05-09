@@ -1,5 +1,5 @@
 import { DEFAULT_FRAME_SETTINGS, type FrameSettings } from "./frameSettings";
-import { getPaletteColors, normalizeColorPalette, normalizeDitheringAlgorithm } from "@/utils/dithering";
+import { mapLayersToBackendPayload, type LayerToBackendOptions } from "@/lib/layerMapping";
 
 export type { ColorPalette, DitheringAlgorithm } from "@/utils/dithering";
 
@@ -62,6 +62,11 @@ export interface BackendEffectLayerPayload {
   snap_to_palette?: boolean;
   palette_mix?: number;
   global_seed?: number;
+  // Channel Mask parameters
+  mask_r?: boolean;
+  mask_g?: boolean;
+  mask_b?: boolean;
+  mask_a?: boolean;
 }
 
 export function makeLayerId(): string {
@@ -93,91 +98,34 @@ export function cloneLayers(layers: Layer[]): Layer[] {
   return layers.map((layer) => cloneLayer(layer));
 }
 
-const FRONTEND_TO_BACKEND_PALETTE: Partial<Record<string, string>> = {
-  Gameboy: "GameBoy",
-  GameBoy: "GameBoy",
-  C64: "Commodore 64",
-  "Commodore 64": "Commodore 64",
-};
-
-export function toBackendPaletteName(palette: string): string {
-  const normalized = normalizeColorPalette(palette);
-  return FRONTEND_TO_BACKEND_PALETTE[normalized] ?? normalized;
-}
-
+/**
+ * Canonical function to build backend payload from domain layers.
+ * Uses pure mapper functions from @/lib/layerMapping with runtime validation.
+ */
 export function buildBackendLayersPayload(
   layers: Layer[],
   customPalette: [number, number, number][],
 ): BackendEffectLayerPayload[] {
-  const payload: BackendEffectLayerPayload[] = [];
-
-  for (const layer of layers) {
-    if (!layer.visible) continue;
-
-    const s = layer.settings;
-    const common: BackendEffectLayerPayload = {
-      id: layer.id,
-      algorithm: normalizeDitheringAlgorithm(String(s.algorithm ?? "Floyd-Steinberg")),
-      enabled: layer.visible && !layer.locked,
-      intensity: Number(s.intensity ?? 100),
-      blend_mode: String(s.blendMode ?? layer.blendMode),
-      opacity: Number((s.layerOpacity ?? layer.opacity) as number) / 100,
-      contrast: Number(s.contrast ?? 100),
-      brightness: Number(s.brightness ?? 100),
-      saturation: Number(s.saturation ?? 100),
-      pixel_size: Number(s.pixelSize ?? 1),
-      blur: Number(s.blur ?? 0),
-      sharpness: Number(s.sharpness ?? 0),
-      noise: Number(s.noise ?? 0),
-      glitch_type: String(s.glitchType ?? "None"),
-      sort_by: String(s.pixelSortMetric ?? "luma"),
-      masking: String(s.pixelSortMask ?? "all"),
-      mask_target: String(s.maskTarget ?? "all"),
-      mask_feather: Number(s.maskFeather ?? 0.2),
-      threshold_min: Number(s.thresholdMin ?? 20),
-      threshold_max: Number(s.thresholdMax ?? 80),
-      direction_angle: Number(s.angle ?? 0),
-      sort_length: Number(s.sortLength ?? 64),
-      block_size: Number(s.blockSize ?? 16),
-      chaos: Number(s.chaos ?? 40),
-      quantization: Number(s.quantization ?? 45),
-      red_shift_x: Number(s.redShiftX ?? 4),
-      red_shift_y: Number(s.redShiftY ?? 0),
-      green_shift_x: Number(s.greenShiftX ?? 0),
-      green_shift_y: Number(s.greenShiftY ?? 0),
-      blue_shift_x: Number(s.blueShiftX ?? -4),
-      blue_shift_y: Number(s.blueShiftY ?? 0),
-      global_rgb_shift_intensity: Number(s.globalRgbShiftIntensity ?? 70),
-      slice_count: Number(s.sliceCount ?? 14),
-      max_offset: Number(s.maxOffset ?? 48),
-      randomness: Number(s.randomness ?? 50),
-      scanline_thickness: Number(s.scanlineThickness ?? 1),
-      scanline_gap: Number(s.scanlineGap ?? 2),
-      flicker: Number(s.flicker ?? 16),
-      curvature: Number(s.curvature ?? 12),
-      snap_to_palette: Boolean(s.snapGlitchToPalette ?? false),
-      palette_mix: Number(s.paletteMix ?? 100),
-      global_seed: Number(s.globalSeed ?? 1337),
-    };
-
-    if (String(s.palette ?? "Grayscale") === "Custom") {
-      payload.push({
-        ...common,
-        palette: customPalette.length > 0
-          ? customPalette
-          : getPaletteColors("Grayscale").map((color) => [color[0] ?? 0, color[1] ?? 0, color[2] ?? 0] as [number, number, number]),
-      });
-    } else {
-      payload.push({
-        ...common,
-        palette_name: toBackendPaletteName(String(s.palette ?? "Grayscale")),
-      });
-    }
-  }
-
-  return payload;
+  const options: LayerToBackendOptions = { customPalette };
+  // Type assertion: validated payload matches BackendEffectLayerPayload structure
+  return mapLayersToBackendPayload(layers, options) as BackendEffectLayerPayload[];
 }
 
 export function createDefaultLayer(name = "Layer", type: LayerType = "adjustment"): Layer {
   return makeLayer({ name, type });
+}
+
+/**
+ * Default base layer used for new/open project bootstrap.
+ * It renders source unchanged until the user explicitly enables an effect.
+ */
+export function createNeutralLayer(name = "1", type: LayerType = "adjustment"): Layer {
+  return makeLayer({
+    name,
+    type,
+    settings: {
+      ...DEFAULT_FRAME_SETTINGS,
+      algorithm: "None",
+    },
+  });
 }

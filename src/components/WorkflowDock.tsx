@@ -5,7 +5,6 @@ import { type VideoMetadataLike } from "@/lib/mediaWorkflow";
 
 interface WorkflowDockProps {
   mode: WorkspaceMode;
-  hasImage: boolean;
   hasVideoSource: boolean;
   backendConnected: boolean;
   imageSize?: string;
@@ -19,7 +18,6 @@ interface WorkflowDockProps {
   jobProgressText?: string;
   jobOutputPath?: string | null;
   onRunVideoWorkflow: () => void;
-  onExportSvg: () => void;
   onCancelJob: () => void;
   canRenderVideo: boolean;
   videoRenderBlockedReason?: string;
@@ -27,7 +25,6 @@ interface WorkflowDockProps {
 
 export const WorkflowDock = ({
   mode,
-  hasImage,
   hasVideoSource,
   backendConnected,
   imageSize,
@@ -41,13 +38,12 @@ export const WorkflowDock = ({
   jobProgressText,
   jobOutputPath,
   onRunVideoWorkflow,
-  onExportSvg,
   onCancelJob,
   canRenderVideo,
   videoRenderBlockedReason,
 }: WorkflowDockProps) => {
   const statusText = workflowStatus ?? jobProgressText ?? "Ready";
-  const formatTag = mode === "video" ? "MP4" : mode === "animation" ? "GIF" : "SVG";
+  const formatTag = mode === "video" ? "MP4" : "GIF";
   const sourceText = sourceLabel ?? imageSize ?? "No media";
 
   return (
@@ -59,21 +55,6 @@ export const WorkflowDock = ({
         </div>
 
         <div className="win98-icon-separator" aria-hidden="true" />
-
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              className="win95-button win98-icon-button"
-              onClick={onExportSvg}
-              disabled={!hasImage}
-              aria-label="Export SVG"
-            >
-              <ICONS.EXPORT_SVG />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>Export SVG</TooltipContent>
-        </Tooltip>
 
         <span className="inline-flex items-center gap-0.5 text-[9px] uppercase tracking-wide">
           <ICONS.FORMAT_DOT />

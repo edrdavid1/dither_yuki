@@ -74,7 +74,7 @@ export const PresetManager = ({ currentSettings, onClose, onLoadPreset }: Preset
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="win95-window w-full max-w-2xl max-h-[80vh] flex flex-col">
+      <div className="win95-window w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden">
         <div className="win95-titlebar">
           <span className="text-sm font-bold">Preset Manager</span>
           <button 
@@ -85,9 +85,9 @@ export const PresetManager = ({ currentSettings, onClose, onLoadPreset }: Preset
           </button>
         </div>
         
-        <div className="p-4 space-y-4 overflow-y-auto win98-scroll">
+        <div className="p-4 flex flex-col flex-1 min-h-0 overflow-hidden space-y-4">
           {/* Save New Preset */}
-          <div className="win95-panel p-3 space-y-2">
+          <div className="win95-panel p-3 space-y-2 shrink-0">
             <div className="font-bold text-sm border-b-2 border-win95-dark pb-1 mb-2">
               Save Current Settings
             </div>
@@ -119,8 +119,8 @@ export const PresetManager = ({ currentSettings, onClose, onLoadPreset }: Preset
           </div>
 
           {/* Saved Presets */}
-          <div className="win95-panel p-3 space-y-2">
-            <div className="font-bold text-sm border-b-2 border-win95-dark pb-1 mb-2">
+          <div className="win95-panel flex flex-col p-3 space-y-2 min-h-0">
+            <div className="font-bold text-sm border-b-2 border-win95-dark pb-1 mb-2 shrink-0">
               Saved Presets ({presets.length})
             </div>
             {presets.length === 0 ? (
@@ -128,7 +128,7 @@ export const PresetManager = ({ currentSettings, onClose, onLoadPreset }: Preset
                 No presets saved yet
               </p>
             ) : (
-              <div className="space-y-2 max-h-[300px] overflow-y-auto win98-scroll">
+              <div className="space-y-2 flex-1 min-h-0 overflow-y-auto win98-scroll">
                 {presets.map((preset, index) => (
                   <div key={index} className="win95-border-inset p-2 bg-background flex items-center justify-between gap-2">
                     <div className="flex-1">

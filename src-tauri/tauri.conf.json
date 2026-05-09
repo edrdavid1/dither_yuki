@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Dither Yuki",
-  "version": "1.0.0",
+  "version": "2.0.0-beta",
   "identifier": "com.ditheryuki",
   "build": {
     "frontendDist": "../dist",
@@ -28,6 +28,8 @@
   },
   "bundle": {
     "active": true,
+    "copyright": "© 2026 Dither Yuki",
+    "publisher": "L'eco non di Bergamo",
     "targets": ["dmg", "app"],
     "externalBin": [
       "../bin/ffmpeg",
@@ -39,6 +41,27 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "fileAssociations": [
+      {
+        "ext": ["dyproj"],
+        "name": "Dither Yuki Project",
+        "description": "Professional dithering and image processing tool with retro aesthetics.",
+        "role": "Editor"
+      },
+      {
+        "ext": ["dyuki"],
+        "name": "Dither Yuki Pattern Preset",
+        "description": "Dither Yuki Shareable Pattern Preset",
+        "role": "Editor"
+      }
+    ],
+    "macOS": {
+      "infoPlist": "Info.plist",
+      "files": {
+        "Resources/dyproj.icns": "../dist/dyproj.icns",
+        "Resources/dyuki.icns": "../dist/dyuki.icns"
+      }
+    }
   }
 }

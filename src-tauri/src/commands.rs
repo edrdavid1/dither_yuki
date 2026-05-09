@@ -167,6 +167,38 @@ pub struct RenderStillAnimationResult {
     pub processed_frames: Vec<Vec<u8>>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportGifRequest {
+    /// Raw GIF file bytes
+    pub gif_bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GifFrameData {
+    /// Frame width
+    pub width: u32,
+    /// Frame height
+    pub height: u32,
+    /// Frame delay in milliseconds
+    pub delay_ms: u32,
+    /// Whether this frame is a keyframe
+    pub is_keyframe: bool,
+    /// PNG data URL for preview (base64 encoded)
+    pub data_url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportGifResult {
+    /// Canvas width
+    pub width: u32,
+    /// Canvas height
+    pub height: u32,
+    /// Loop count (0 = infinite)
+    pub loop_count: u16,
+    /// All decoded frames
+    pub frames: Vec<GifFrameData>,
+}
+
 fn slugify_name(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     for ch in input.trim().chars() {
@@ -359,6 +391,33 @@ pub async fn import_palette(file_bytes: Vec<u8>, format: String) -> Result<Palet
     let color_count = colors.len();
 
     Ok(PaletteImportResult { colors, color_count })
+}
+
+#[tauri::command]
+pub async fn import_gif(request: ImportGifRequest) -> Result<ImportGifResult, String> {
+    use crate::gif_import::{import_gif_from_bytes, rgba_to_data_url};
+    
+    let import_result = import_gif_from_bytes(&request.gif_bytes)?;
+    
+    // Convert frames to frontend-friendly format with data URLs
+    let mut frames = Vec::with_capacity(import_result.frames.len());
+    for frame in import_result.frames {
+        let data_url = rgba_to_data_url(frame.width, frame.height, &frame.rgba)?;
+        frames.push(GifFrameData {
+            width: frame.width,
+            height: frame.height,
+            delay_ms: frame.delay_ms,
+            is_keyframe: frame.is_keyframe,
+            data_url,
+        });
+    }
+    
+    Ok(ImportGifResult {
+        width: import_result.width,
+        height: import_result.height,
+        loop_count: import_result.loop_count,
+        frames,
+    })
 }
 
 #[tauri::command]

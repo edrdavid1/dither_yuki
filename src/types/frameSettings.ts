@@ -6,6 +6,7 @@
 export interface FrameSettings {
   algorithm: string;
   palette: string;
+  customPalette?: [number, number, number][];
   intensity: number;
   contrast: number;
   brightness: number;
@@ -45,11 +46,17 @@ export interface FrameSettings {
   paletteMix: number;
   maskTarget: string;
   maskFeather: number;
+  // Channel Mask parameters
+  maskR: boolean;
+  maskG: boolean;
+  maskB: boolean;
+  maskA: boolean;
 }
 
 export const DEFAULT_FRAME_SETTINGS: FrameSettings = {
   algorithm: "Floyd-Steinberg",
   palette: "Grayscale",
+  customPalette: undefined,
   intensity: 100,
   contrast: 100,
   brightness: 100,
@@ -89,6 +96,10 @@ export const DEFAULT_FRAME_SETTINGS: FrameSettings = {
   paletteMix: 100,
   maskTarget: "all",
   maskFeather: 0.2,
+  maskR: true,
+  maskG: true,
+  maskB: true,
+  maskA: true,
 };
 
 /** Linear interpolation between two FrameSettings for a given t ∈ [0, 1]. */
@@ -99,6 +110,7 @@ export function lerpFrameSettings(a: FrameSettings, b: FrameSettings, t: number)
   return {
     algorithm: pick(a.algorithm, b.algorithm),
     palette: pick(a.palette, b.palette),
+    customPalette: pick(a.customPalette, b.customPalette),
     intensity: lerp(a.intensity, b.intensity),
     contrast: lerp(a.contrast, b.contrast),
     brightness: lerp(a.brightness, b.brightness),
@@ -138,5 +150,9 @@ export function lerpFrameSettings(a: FrameSettings, b: FrameSettings, t: number)
     paletteMix: lerp(a.paletteMix, b.paletteMix),
     maskTarget: pick(a.maskTarget, b.maskTarget),
     maskFeather: lerp(a.maskFeather, b.maskFeather),
+    maskR: pick(a.maskR, b.maskR),
+    maskG: pick(a.maskG, b.maskG),
+    maskB: pick(a.maskB, b.maskB),
+    maskA: pick(a.maskA, b.maskA),
   };
 }

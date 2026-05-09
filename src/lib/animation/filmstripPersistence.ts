@@ -6,6 +6,8 @@ export interface FilmstripProjectData {
   frames: AnimationFrame[];
   selectedFrameIndex: number;
   selectedFrameIds: string[];
+  rootLayers?: AnimationFrame["layers"];
+  rootActiveLayerId?: string;
 }
 
 const FILMSTRIP_DATA_VERSION = 1 as const;
@@ -24,6 +26,8 @@ export function encodeFilmstripProjectData(data: FilmstripProjectData): number[]
     frames: data.frames,
     selectedFrameIndex: data.selectedFrameIndex,
     selectedFrameIds: data.selectedFrameIds,
+    rootLayers: data.rootLayers,
+    rootActiveLayerId: data.rootActiveLayerId,
   } satisfies FilmstripProjectData));
 }
 
@@ -61,6 +65,8 @@ export function decodeFilmstripProjectData(bytes: number[] | Uint8Array | null |
       frames,
       selectedFrameIndex,
       selectedFrameIds,
+      rootLayers: Array.isArray(parsed.rootLayers) ? cloneLayers(parsed.rootLayers) : undefined,
+      rootActiveLayerId: typeof parsed.rootActiveLayerId === "string" ? parsed.rootActiveLayerId : undefined,
     };
   } catch {
     return null;

@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { ColorPalette, DitheringAlgorithm } from "@/types/layers";
-import { normalizeColorPalette, normalizeDitheringAlgorithm } from "@/utils/dithering";
+import { normalizeColorPalette, normalizeDitheringAlgorithm, setCustomPalette } from "@/utils/dithering";
 import type { FrameSettings } from "@/types/frameSettings";
 
 export interface EditorControlSyncValues {
   algorithm: DitheringAlgorithm;
   palette: ColorPalette;
+  customPalette: [number, number, number][];
   intensity: number;
   contrast: number;
   brightness: number;
@@ -46,9 +47,14 @@ export interface EditorControlSyncValues {
   paletteMix: number;
   maskTarget: string;
   maskFeather: number;
+  maskR: boolean;
+  maskG: boolean;
+  maskB: boolean;
+  maskA: boolean;
 }
 
 export interface EditorControlSyncSetters {
+  setCustomColors: Dispatch<SetStateAction<string[]>>;
   setAlgorithm: Dispatch<SetStateAction<DitheringAlgorithm>>;
   setPalette: Dispatch<SetStateAction<ColorPalette>>;
   setIntensity: Dispatch<SetStateAction<number>>;
@@ -90,6 +96,10 @@ export interface EditorControlSyncSetters {
   setPaletteMix: Dispatch<SetStateAction<number>>;
   setMaskTarget: Dispatch<SetStateAction<string>>;
   setMaskFeather: Dispatch<SetStateAction<number>>;
+  setMaskR: Dispatch<SetStateAction<boolean>>;
+  setMaskG: Dispatch<SetStateAction<boolean>>;
+  setMaskB: Dispatch<SetStateAction<boolean>>;
+  setMaskA: Dispatch<SetStateAction<boolean>>;
 }
 
 export interface UseEditorControlSyncArgs {
@@ -123,6 +133,7 @@ export function useEditorControlSync({ values, setters }: UseEditorControlSyncAr
   const captureEffectParams = useCallback((): FrameSettings => ({
     algorithm: values.algorithm,
     palette: values.palette,
+    customPalette: values.palette === "Custom" ? values.customPalette : undefined,
     intensity: values.intensity,
     contrast: values.contrast,
     brightness: values.brightness,
@@ -162,11 +173,23 @@ export function useEditorControlSync({ values, setters }: UseEditorControlSyncAr
     paletteMix: values.paletteMix,
     maskTarget: values.maskTarget,
     maskFeather: values.maskFeather,
+    maskR: values.maskR,
+    maskG: values.maskG,
+    maskB: values.maskB,
+    maskA: values.maskA,
   }), [values]);
 
   const applyEffectParams = useCallback((params: Partial<FrameSettings>) => {
     setters.setAlgorithm(normalizeDitheringAlgorithm(String(params.algorithm ?? "Floyd-Steinberg")) as DitheringAlgorithm);
     setters.setPalette(normalizeColorPalette(String(params.palette ?? "Grayscale")) as ColorPalette);
+    if (String(params.palette ?? "Grayscale") === "Custom" && params.customPalette?.length) {
+      const hexColors = params.customPalette.map(([r, g, b]) => {
+        const toHex = (value: number) => value.toString(16).padStart(2, "0").toUpperCase();
+        return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+      });
+      setters.setCustomColors(hexColors);
+      setCustomPalette(hexColors);
+    }
     setters.setIntensity(Number(params.intensity ?? 100));
     setters.setContrast(Number(params.contrast ?? 100));
     setters.setBrightness(Number(params.brightness ?? 100));
@@ -206,6 +229,10 @@ export function useEditorControlSync({ values, setters }: UseEditorControlSyncAr
     setters.setPaletteMix(Number(params.paletteMix ?? 100));
     setters.setMaskTarget(String(params.maskTarget ?? "all"));
     setters.setMaskFeather(Number(params.maskFeather ?? 0.2));
+    setters.setMaskR(Boolean(params.maskR ?? true));
+    setters.setMaskG(Boolean(params.maskG ?? true));
+    setters.setMaskB(Boolean(params.maskB ?? true));
+    setters.setMaskA(Boolean(params.maskA ?? true));
   }, [setters]);
 
   useEffect(() => {

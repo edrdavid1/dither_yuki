@@ -27,20 +27,20 @@ export const ShortcutsDialog = ({ onClose }: ShortcutsDialogProps) => {
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="win95-window w-full max-w-md">
+      <div className="win95-window w-full max-w-md max-h-[80vh] flex flex-col">
         <div className="win95-titlebar">
           <span className="text-sm font-bold">Keyboard Shortcuts</span>
-          <button 
+          <button
             onClick={onClose}
             className="bg-card px-2 text-xs border border-win95-light hover:bg-muted"
           >
             <X className="h-3 w-3" />
           </button>
         </div>
-        <div className="p-6 space-y-4">
+        <div className="p-6 space-y-4 flex-1 overflow-y-auto win98-scroll">
           <div className="space-y-2">
             {shortcuts.map((shortcut, index) => (
-              <div 
+              <div
                 key={index}
                 className="flex justify-between items-center py-2 border-b border-win95-dark last:border-0"
               >

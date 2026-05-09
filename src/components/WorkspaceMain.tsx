@@ -35,11 +35,8 @@ interface WorkspaceMainProps {
   onAddFrame: () => void;
   onImportFrame: () => void;
   onDeleteSelectedFrame: () => void;
-  onApplyEffectToSelectedFrame: () => void;
-  onApplyToSelected: () => void;
-  onInterpolateSelected: () => Promise<void>;
+  onApplyToSelected?: () => void;
   onRenderAnimation: () => Promise<void>;
-  onToggleKeyframe: (index: number) => void;
 
   videoPreviewFrames: VideoPreviewFrame[];
   selectedVideoPreviewFrame: number;
@@ -76,11 +73,8 @@ export const WorkspaceMain = ({
   onAddFrame,
   onImportFrame,
   onDeleteSelectedFrame,
-  onApplyEffectToSelectedFrame,
   onApplyToSelected,
-  onInterpolateSelected,
   onRenderAnimation,
-  onToggleKeyframe,
   videoPreviewFrames,
   selectedVideoPreviewFrame,
   setSelectedVideoPreviewFrame,
@@ -122,15 +116,12 @@ export const WorkspaceMain = ({
             onAddFrame={onAddFrame}
             onImportFrame={onImportFrame}
             onDeleteFrame={onDeleteSelectedFrame}
-            onApplyFrame={onApplyEffectToSelectedFrame}
-            onApplyToSelected={onApplyToSelected}
             onRender={onRenderAnimation}
-            onToggleKeyframe={onToggleKeyframe}
             canDeleteFrame={frames.length > 1}
             canRunFrameActions={frames.length > 0}
             selectedFrameIds={selectedFrameIds}
             onMultiSelect={onMultiSelectFrame}
-            onInterpolate={onInterpolateSelected}
+            onApplyToSelected={onApplyToSelected}
           />
         </div>
       )}

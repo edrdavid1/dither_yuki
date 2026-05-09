@@ -102,7 +102,7 @@ export const MenuBar = ({
 
   return (
     <div className="bg-card px-0 pt-0">
-      <div className="flex items-center gap-0.5 border-b border-black/10 pb-0 text-xs min-h-0 h-7">
+      <div className="flex items-center gap-0.5 border-b border-black/10 pb-0 text-xs min-h-0 h-7" style={{ paddingLeft: '8.5px', paddingRight: '8.5px' }}> 
         {/* <div className="win95-border-inset mr-1 hidden items-center gap-2 bg-white px-2 py-1 text-[10px] font-bold sm:flex">
           <span className="h-2 w-2 bg-primary" />
           <span>Dither Yuki</span>
@@ -136,8 +136,7 @@ export const MenuBar = ({
           </div>
         ))}
         <div className="ml-auto hidden px-1 text-[10px] text-muted-foreground md:block">
-          {backendConnected ? "Desktop backend ready" : "Browser fallback"}
-          {workspaceMode ? ` • ${workspaceMode} workspace` : ""}
+          { workspaceMode ? ` ${workspaceMode} workspace` : ""}
         </div>
       </div>
     </div>

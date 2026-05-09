@@ -1,4 +1,4 @@
-import { cloneLayers, createDefaultLayer, type Layer } from "./layers";
+import { cloneLayers, createNeutralLayer, type Layer } from "./layers";
 
 /**
  * A single frame in the animation filmstrip.
@@ -32,7 +32,7 @@ export const DEFAULT_EASING = "linear";
 export function makeAnimationFrame(
   partial: Pick<AnimationFrame, "id" | "src" | "width" | "height"> & Partial<AnimationFrame>,
 ): AnimationFrame {
-  const defaultLayers = [createDefaultLayer()];
+  const defaultLayers = [createNeutralLayer()];
   return {
     layers: cloneLayers(partial.layers ?? defaultLayers),
     activeLayerId: partial.activeLayerId ?? defaultLayers[0]!.id,

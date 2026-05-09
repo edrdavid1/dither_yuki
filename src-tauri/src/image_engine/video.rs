@@ -55,6 +55,11 @@ pub struct EffectLayer {
     /// When true, the alpha channel from the source image is preserved in the
     /// output regardless of what the effect would produce.
     pub keep_alpha: Option<bool>,
+    /// Channel mask algorithm parameters (for "Channel Mask" algorithm)
+    pub mask_r: Option<bool>,
+    pub mask_g: Option<bool>,
+    pub mask_b: Option<bool>,
+    pub mask_a: Option<bool>,
 }
 
 /// Per-channel on/off mask.
@@ -281,6 +286,11 @@ struct ResolvedLayer {
     global_seed: u64,
     channel_mask: Option<ChannelMask>,
     keep_alpha: bool,
+    // Channel Mask algorithm parameters
+    mask_r: bool,
+    mask_g: bool,
+    mask_b: bool,
+    mask_a: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -389,8 +399,24 @@ impl ResolvedLayer {
             snap_to_palette: layer.snap_to_palette.unwrap_or(false),
             palette_mix: layer.palette_mix.unwrap_or(100.0).clamp(0.0, 100.0),
             global_seed: layer.global_seed.unwrap_or(1337),
-            channel_mask: layer.channel_mask,
+            // Build channel_mask from mask_r/g/b/a if not explicitly set
+            channel_mask: layer.channel_mask.or_else(|| {
+                let r = layer.mask_r.unwrap_or(true);
+                let g = layer.mask_g.unwrap_or(true);
+                let b = layer.mask_b.unwrap_or(true);
+                let a = layer.mask_a.unwrap_or(true);
+                // Only create mask if at least one channel is disabled
+                if !r || !g || !b || !a {
+                    Some(ChannelMask { r, g, b, a })
+                } else {
+                    None
+                }
+            }),
             keep_alpha: layer.keep_alpha.unwrap_or(false),
+            mask_r: layer.mask_r.unwrap_or(true),
+            mask_g: layer.mask_g.unwrap_or(true),
+            mask_b: layer.mask_b.unwrap_or(true),
+            mask_a: layer.mask_a.unwrap_or(true),
         })
     }
 }
@@ -974,18 +1000,9 @@ fn apply_content_mask(effected: &mut ImageData, source: &ImageData, target: &str
 
 /// Zero out disabled channels in `effected`.
 /// If `keep_alpha` is true, the alpha channel is always restored from `source`.
+/// Delegates to the channel_mask module for consistency.
 fn apply_channel_mask(effected: &mut ImageData, mask: ChannelMask, keep_alpha: bool, source: &ImageData) {
-    let n = effected.data.len();
-    let mut i = 0;
-    while i + 3 < n {
-        if !mask.r { effected.data[i]     = 0; }
-        if !mask.g { effected.data[i + 1] = 0; }
-        if !mask.b { effected.data[i + 2] = 0; }
-        if keep_alpha || !mask.a {
-            effected.data[i + 3] = source.data[i + 3];
-        }
-        i += 4;
-    }
+    super::apply_channel_mask_to_image(effected, &mask, keep_alpha, source);
 }
 
 /// Restore original alpha values without touching RGB.
@@ -1356,7 +1373,18 @@ fn process_single_frame(
         let original_width = image.width;
         let original_height = image.height;
         let source_is_grayscale_like = is_grayscale_like(&image);
-        let effect = AlgorithmRegistry::create(&layer.algorithm, layer.palette.clone(), intensity)?;
+
+        // Special handling for Channel Mask algorithm to use layer mask parameters
+        let effect: Box<dyn Effect> = if layer.algorithm == "Channel Mask" {
+            Box::new(super::ChannelMask::new(
+                layer.mask_r,
+                layer.mask_g,
+                layer.mask_b,
+                layer.mask_a,
+            ))
+        } else {
+            AlgorithmRegistry::create(&layer.algorithm, layer.palette.clone(), intensity)?
+        };
         let mut effected = image.clone();
 
         apply_adjustments(&mut effected, layer.contrast, layer.brightness, layer.saturation);

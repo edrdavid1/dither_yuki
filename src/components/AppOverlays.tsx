@@ -20,14 +20,18 @@ interface PresetSettings {
 interface AppOverlaysProps {
   showColorStudio: boolean;
   onCloseColorStudio: () => void;
-  customColors: string[];
+  activePaletteColors: string[];
   quantizationMethod: string;
   setQuantizationMethod: (value: string) => void;
   quantizationColorCount: number;
   setQuantizationColorCount: (value: number) => void;
   canAutoQuantize: boolean;
+  canExtractFromOriginal: boolean;
   quantizingPalette: boolean;
   onExtractFromImage: () => Promise<string[] | null>;
+  onExtractFromOriginal: () => Promise<string[] | null>;
+  onImportPalette: () => Promise<string[] | null>;
+  onExportPalette: () => Promise<void>;
   onSavePalette: (colors: string[]) => void;
 
   showAbout: boolean;
@@ -59,14 +63,18 @@ interface AppOverlaysProps {
 export const AppOverlays = ({
   showColorStudio,
   onCloseColorStudio,
-  customColors,
+  activePaletteColors,
   quantizationMethod,
   setQuantizationMethod,
   quantizationColorCount,
   setQuantizationColorCount,
   canAutoQuantize,
+  canExtractFromOriginal,
   quantizingPalette,
   onExtractFromImage,
+  onExtractFromOriginal,
+  onImportPalette,
+  onExportPalette,
   onSavePalette,
   showAbout,
   onCloseAbout,
@@ -93,14 +101,18 @@ export const AppOverlays = ({
     <>
       {showColorStudio && (
         <ColorStudioDialog
-          initialColors={customColors}
+          initialColors={activePaletteColors}
           quantizationMethod={quantizationMethod}
           setQuantizationMethod={setQuantizationMethod}
           quantizationColorCount={quantizationColorCount}
           setQuantizationColorCount={setQuantizationColorCount}
           canAutoQuantize={canAutoQuantize}
+          canExtractFromOriginal={canExtractFromOriginal}
           isQuantizing={quantizingPalette}
           onExtractFromImage={onExtractFromImage}
+          onExtractFromOriginal={onExtractFromOriginal}
+          onImportPalette={onImportPalette}
+          onExportPalette={onExportPalette}
           onSave={onSavePalette}
           onClose={onCloseColorStudio}
         />
