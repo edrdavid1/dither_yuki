@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ditheryuki.app/schemas/video-job.v1.schema.json",
+  "title": "VideoJobContractsV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "request", "progress"],
+  "properties": {
+    "version": { "const": 1 },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["videoId", "startFrame", "endFrame", "fps", "outputFormat"],
+      "properties": {
+        "videoId": { "type": "string", "minLength": 1 },
+        "startFrame": { "type": "integer", "minimum": 0 },
+        "endFrame": { "type": "integer", "minimum": 0 },
+        "fps": { "type": "number", "minimum": 1 },
+        "outputFormat": { "type": "string", "enum": ["gif", "dykframes", "mp4"] }
+      }
+    },
+    "progress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jobId", "status", "currentFrame", "totalFrames"],
+      "properties": {
+        "jobId": { "type": "string", "minLength": 1 },
+        "status": { "type": "string", "enum": ["queued", "running", "completed", "cancelled", "failed"] },
+        "currentFrame": { "type": "integer", "minimum": 0 },
+        "totalFrames": { "type": "integer", "minimum": 0 },
+        "outputPath": { "type": ["string", "null"] }
+      }
+    }
+  }
+}
+

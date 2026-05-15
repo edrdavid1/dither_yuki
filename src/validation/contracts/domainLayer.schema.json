@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ditheryuki.app/schemas/domain-layer.schema.json",
+  "title": "DomainLayer",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "name", "type", "visible", "locked", "blendMode", "opacity", "settings"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "name": { "type": "string", "minLength": 1 },
+    "type": { "type": "string", "enum": ["image", "generator", "adjustment"] },
+    "visible": { "type": "boolean" },
+    "locked": { "type": "boolean" },
+    "blendMode": { "type": "string", "enum": ["normal", "multiply", "screen", "overlay", "add"] },
+    "opacity": { "type": "number", "minimum": 0, "maximum": 100 },
+    "settings": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["algorithm", "palette", "intensity", "contrast", "brightness", "saturation", "pixelSize", "blur", "sharpness", "noise"],
+      "properties": {
+        "algorithm": { "type": "string" },
+        "palette": { "type": "string" },
+        "customPalette": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 3,
+            "items": { "type": "integer", "minimum": 0, "maximum": 255 }
+          }
+        },
+        "intensity": { "type": "number" },
+        "contrast": { "type": "number" },
+        "brightness": { "type": "number" },
+        "saturation": { "type": "number" },
+        "pixelSize": { "type": "number" },
+        "blur": { "type": "number" },
+        "sharpness": { "type": "number" },
+        "noise": { "type": "number" }
+      }
+    }
+  }
+}
+

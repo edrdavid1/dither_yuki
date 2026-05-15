@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ditheryuki.app/schemas/video-frame-request.v1.schema.json",
+  "title": "VideoFrameRequestV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "videoId", "frameIndex", "width", "height", "frameRgba", "layerPayload"],
+  "properties": {
+    "version": { "const": 1 },
+    "videoId": { "type": "string", "minLength": 1 },
+    "frameIndex": { "type": "integer", "minimum": 0 },
+    "qualityMode": { "type": "string", "enum": ["fast", "accurate"] },
+    "scale": { "type": "number", "minimum": 0.1, "maximum": 1.0 },
+    "width": { "type": "integer", "minimum": 1 },
+    "height": { "type": "integer", "minimum": 1 },
+    "frameRgba": {
+      "type": "array",
+      "items": { "type": "integer", "minimum": 0, "maximum": 255 }
+    },
+    "layerSnapshotHash": { "type": "string", "minLength": 1 },
+    "layerPayload": {
+      "type": "array",
+      "items": { "type": "object", "additionalProperties": true }
+    },
+    "processingBackend": { "type": "string", "enum": ["cpu", "gpu"] },
+    "transportRequestId": { "type": "string", "minLength": 1 }
+  }
+}
+

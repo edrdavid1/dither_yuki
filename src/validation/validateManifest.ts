@@ -42,6 +42,42 @@ const animationSchema = {
   additionalProperties: false,
 };
 
+const layerRangeSchema = {
+  type: "object",
+  properties: {
+    startFrame: { type: "integer", minimum: 0 },
+    endFrame: { type: "integer", minimum: 0 },
+    enabled: { type: "boolean" },
+    opacity01: { type: "number", minimum: 0, maximum: 1 },
+    intensity: { type: "number" },
+  },
+  required: ["startFrame", "endFrame"],
+  additionalProperties: false,
+};
+
+const layerKeyframeSchema = {
+  type: "object",
+  properties: {
+    frame: { type: "integer", minimum: 0 },
+    opacity01: { type: "number", minimum: 0, maximum: 1 },
+    intensity: { type: "number" },
+  },
+  required: ["frame"],
+  additionalProperties: false,
+};
+
+const layerTrackSchema = {
+  type: "object",
+  properties: {
+    layerId: { type: "string" },
+    disableOutsideRanges: { type: "boolean" },
+    ranges: { type: "array", items: layerRangeSchema },
+    keyframes: { type: "array", items: layerKeyframeSchema },
+  },
+  required: ["layerId", "ranges", "keyframes"],
+  additionalProperties: false,
+};
+
 const layerSchema = {
   type: "object",
   properties: {
@@ -106,6 +142,7 @@ const manifestSchema = {
     palettes: { type: "array", items: paletteSchema },
     assets: { type: "array", items: assetSchema },
     animation: { oneOf: [animationSchema, { type: "null" }] },
+    videoLayerTracks: { type: "array", items: layerTrackSchema },
   },
   required: ["version", "id", "createdAt", "modifiedAt", "name", "layers", "palettes", "assets"],
 };

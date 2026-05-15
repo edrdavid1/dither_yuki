@@ -27,6 +27,15 @@ jobs:
       - name: Run tests
         run: npm run test
 
+      - name: Contract tests
+        run: npm run test:contracts
+
+      - name: Parity tests
+        run: npm run test:parity
+
+      - name: Performance smoke tests
+        run: npm run test:perf-smoke
+
       - name: Build
         run: npm run build
 

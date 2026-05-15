@@ -4,42 +4,42 @@ import { toast } from "sonner";
 import { cloneLayers, type Layer } from "@/types/layers";
 import { makeAnimationFrame, type AnimationFrame } from "@/types/animationFrame";
 import { interpolateFrameRangeByKeyframes } from "@/lib/animation/interpolation";
+import { extractSingleVideoFrame, rgbaToImage } from "@/lib/mediaWorkflow";
 
 const makeFrameId = () => `frame-${Math.random().toString(36).slice(2, 10)}-${Date.now()}`;
 
-const loadImageFromSrc = (src: string) =>
-  new Promise<HTMLImageElement>((resolve, reject) => {
-    const image = new Image();
-    const finalize = (resolvedSrc: string) => {
-      image.onload = () => resolve(image);
-      image.onerror = reject;
-      image.src = resolvedSrc;
-    };
-
-    if (!src || src.startsWith("data:") || src.startsWith("blob:")) {
-      finalize(src);
-      return;
-    }
-
-    void fetch(src)
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error(`Failed to fetch image source: ${response.status} ${response.statusText}`);
-        }
-        const blob = await response.blob();
-        const objectUrl = URL.createObjectURL(blob);
-        image.onload = () => {
-          URL.revokeObjectURL(objectUrl);
-          resolve(image);
-        };
-        image.onerror = () => {
-          URL.revokeObjectURL(objectUrl);
-          reject(new Error("Failed to load image frame"));
-        };
-        image.src = objectUrl;
-      })
-      .catch(() => finalize(src));
+const blobToDataUrl = async (blob: Blob): Promise<string> =>
+  await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(new Error("Failed to encode blob as data URL"));
+    reader.readAsDataURL(blob);
   });
+
+const loadImageFromSrc = async (src: string): Promise<HTMLImageElement> => {
+  const image = new Image();
+  const resolvedSrc = !src
+    ? ""
+    : src.startsWith("data:")
+      ? src
+      : await fetch(src)
+        .then(async (response) => {
+          if (!response.ok) {
+            throw new Error(`Failed to fetch image source: ${response.status} ${response.statusText}`);
+          }
+          return blobToDataUrl(await response.blob());
+        })
+        .catch((error) => {
+          console.warn("[filmstrip-image-load] source conversion failed, using direct src", error);
+          return src;
+        });
+
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Failed to load image frame"));
+    image.src = resolvedSrc;
+  });
+};
 
 export interface UseFilmstripSessionArgs {
   workspaceMode: string;
@@ -59,7 +59,12 @@ export interface UseFilmstripSessionArgs {
   setStatus: (status: string) => void;
   commitControlsToActiveEffect: () => Layer[] | null;
   applyLayerSnapshotToControls: (layerSnapshot: Layer | null) => void;
-  renderFramePreview: (frameId: string, snapshotLayers?: Layer[], sourceImage?: HTMLImageElement | null) => Promise<string | null>;
+  renderFramePreview: (
+    frameId: string,
+    snapshotLayers?: Layer[],
+    sourceImage?: HTMLImageElement | null,
+    forceProcessedImage?: boolean,
+  ) => Promise<string | null>;
   videoSource: File | null;
 }
 
@@ -122,10 +127,52 @@ export function useFilmstripSession({
 
     const picker = document.createElement("input");
     picker.type = "file";
-    picker.accept = "image/*";
+    picker.accept = "image/*,video/*";
     picker.onchange = () => {
       const file = picker.files?.[0];
       if (!file) return;
+
+      const isVideoFile =
+        file.type.startsWith("video/") || /\.(mp4|mov|m4v|webm|ogv|avi|mkv)$/i.test(file.name);
+
+      const insertImportedFrame = (src: string, width: number, height: number, sourceTimestamp?: number) => {
+        const committedLayers = commitControlsToActiveEffect() ?? cloneLayers(layersRef.current);
+        const imported = makeAnimationFrame({
+          id: makeFrameId(),
+          src,
+          width,
+          height,
+          layers: cloneLayers(committedLayers),
+          activeLayerId: activeLayerIdRef.current,
+          isKeyframe: true,
+          sourceTimestamp,
+        });
+
+        setFrames((prev) => {
+          const next = [...prev];
+          const insertAt = Math.min(selectedFrameIndex + 1, prev.length);
+          next.splice(insertAt, 0, imported);
+          return next;
+        });
+        setSelectedFrameIndex((prev) => Math.min(prev + 1, frames.length));
+        setSelectedFrameIds(new Set([imported.id]));
+        setStatus("Frame imported");
+        toast.success(`Imported: ${file.name}`);
+      };
+
+      if (isVideoFile) {
+        void (async () => {
+          try {
+            const extracted = await extractSingleVideoFrame(file, 0);
+            const image = await rgbaToImage(extracted.rgba, extracted.width, extracted.height);
+            insertImportedFrame(image.src, extracted.width, extracted.height, 0);
+          } catch (error) {
+            console.error("Failed to import video frame", error);
+            toast.error("Failed to import video frame");
+          }
+        })();
+        return;
+      }
 
       const reader = new FileReader();
       reader.onload = async (event) => {
@@ -134,27 +181,7 @@ export function useFilmstripSession({
 
         try {
           const image = await loadImageFromSrc(src);
-          const committedLayers = commitControlsToActiveEffect() ?? cloneLayers(layersRef.current);
-          const imported = makeAnimationFrame({
-            id: makeFrameId(),
-            src,
-            width: image.width,
-            height: image.height,
-            layers: cloneLayers(committedLayers),
-            activeLayerId: activeLayerIdRef.current,
-            isKeyframe: true,
-          });
-
-          setFrames((prev) => {
-            const next = [...prev];
-            const insertAt = Math.min(selectedFrameIndex + 1, prev.length);
-            next.splice(insertAt, 0, imported);
-            return next;
-          });
-          setSelectedFrameIndex((prev) => Math.min(prev + 1, frames.length));
-          setSelectedFrameIds(new Set([imported.id]));
-          setStatus("Frame imported");
-          toast.success(`Imported: ${file.name}`);
+          insertImportedFrame(src, image.width, image.height);
         } catch (error) {
           console.error("Failed to import animation frame", error);
           toast.error("Failed to import frame");
@@ -252,9 +279,12 @@ export function useFilmstripSession({
       ),
     );
     const count = targets.size;
+    if (currentFrameId) {
+      void renderFramePreview(currentFrameId, cloneLayers(committedLayers), null, true);
+    }
     setStatus(`Layer snapshot saved to ${count} frame(s) as keyframes`);
     toast.success(`Applied to ${count} frame(s) — marked as keyframes`);
-  }, [activeLayerIdRef, commitControlsToActiveEffect, framesRef, layersRef, selectedFrameIds, selectedFrameIndex, setFrames, setStatus]);
+  }, [activeLayerIdRef, commitControlsToActiveEffect, framesRef, layersRef, renderFramePreview, selectedFrameIds, selectedFrameIndex, setFrames, setStatus]);
 
   const handleInterpolateSelected = useCallback(async () => {
     const sorted = Array.from(selectedFrameIds)

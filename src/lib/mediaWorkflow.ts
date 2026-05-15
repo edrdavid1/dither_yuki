@@ -87,6 +87,9 @@ export async function probeVideoFileMetadataLocal(file: File): Promise<VideoMeta
       has_audio: false,
     };
   } finally {
+    // Clear src before revoking so WebKit releases the resource cleanly.
+    video.src = "";
+    video.load();
     URL.revokeObjectURL(url);
   }
 }
@@ -203,6 +206,9 @@ export async function extractVideoFrames(
       sampledFrames: frames.length,
     };
   } finally {
+    // Clear src before revoking so WebKit releases the resource cleanly.
+    probe.src = "";
+    probe.load();
     URL.revokeObjectURL(url);
   }
 }
@@ -258,6 +264,9 @@ export async function extractSingleVideoFrame(
     ctx.drawImage(video, 0, 0, width, height);
     return { width, height, rgba: ctx.getImageData(0, 0, width, height).data.slice() };
   } finally {
+    // Clear src before revoking so WebKit releases the resource cleanly.
+    video.src = "";
+    video.load();
     URL.revokeObjectURL(url);
   }
 }

@@ -1,6 +1,7 @@
 mod image_engine;
 mod commands;
 mod video_processing;
+mod video_runtime;
 mod project;
 mod gif_import;
 
@@ -12,6 +13,7 @@ use commands::{
   list_animation_easing_modes, list_animation_parameter_modes,
   import_palette, import_gif, process_image, process_video_file, probe_video_file_metadata,
   check_dependencies,
+  prepare_video_preview_session,
   process_video_file_bytes,
   get_video_processing_progress,
   process_still_animation_file,
@@ -19,9 +21,32 @@ use commands::{
   render_still_animation,
   process_video_frames, process_video_frames_packed, reorder_effect_layers,
   get_default_output_path,
+  get_temp_output_path,
   save_bytes_to_default_location,
   save_bytes_to_path,
   read_bytes_from_path,
+  get_filtered_frame_v2,
+  get_filtered_frame_binary_v2,
+  release_video_preview_session,
+  pull_next_playback_frame_binary,
+  open_playback_stream,
+  close_playback_stream,
+  update_playback_effect_params,
+  render_video_job_v2,
+  cancel_video_job_v2,
+  get_video_job_progress_v2,
+  list_video_jobs_v2,
+  update_filter_params_v2,
+  generate_video_thumbnails,
+  transport_play,
+  transport_pause,
+  transport_seek,
+  transport_set_loop,
+  get_transport_state,
+  init_clock,
+  get_scheduler_state,
+  load_audio_for_video,
+  get_audio_sync_state,
 };
 use project::{save_project, load_project};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -283,6 +308,9 @@ pub fn run() {
             .build(),
         )?;
       }
+      // Initialize the Master Clock service so it is ready before any
+      // transport commands are invoked.
+      video_runtime::init_clock_service(app.handle().clone());
       Ok(())
     })
     .invoke_handler(tauri::generate_handler![
@@ -306,15 +334,30 @@ pub fn run() {
       process_video_file,
       process_video_file_bytes,
       probe_video_file_metadata,
+      prepare_video_preview_session,
+      release_video_preview_session,
       check_dependencies,
       process_still_animation_file,
       get_video_processing_progress,
       cancel_video_processing_job,
       export_video_frames_pack_from_dir,
       get_default_output_path,
+      get_temp_output_path,
       save_bytes_to_default_location,
       save_bytes_to_path,
       read_bytes_from_path,
+      get_filtered_frame_v2,
+      get_filtered_frame_binary_v2,
+      pull_next_playback_frame_binary,
+      open_playback_stream,
+      close_playback_stream,
+      update_playback_effect_params,
+      render_video_job_v2,
+      cancel_video_job_v2,
+      get_video_job_progress_v2,
+      list_video_jobs_v2,
+      update_filter_params_v2,
+      generate_video_thumbnails,
       take_pending_open_project,
       export_pattern_preset,
       import_pattern_preset,
@@ -322,6 +365,15 @@ pub fn run() {
       load_project,
       exit_app,
       set_project_dirty,
+      transport_play,
+      transport_pause,
+      transport_seek,
+      transport_set_loop,
+      get_transport_state,
+      init_clock,
+      get_scheduler_state,
+      load_audio_for_video,
+      get_audio_sync_state,
     ])
     .build(tauri::generate_context!())
     .expect("error while building tauri application")

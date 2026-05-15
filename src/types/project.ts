@@ -1,6 +1,8 @@
 // TypeScript interfaces mirroring the Rust DyprojManifest types.
 // Keep in sync with src-tauri/src/project/types.rs
 
+import type { LayerTrack as VideoLayerTrack } from "@/lib/videoRuntime/layerTracks";
+
 export type StorageMode = "embedded" | "external" | "auto";
 
 export interface Keyframe {
@@ -64,6 +66,8 @@ export interface DyprojManifest {
   palettes: Palette[];
   assets: AssetRecord[];
   animation?: AnimationData | null;
+  videoLayerTracks: VideoLayerTrack[];
+  videoAssetPath?: string | null;
 }
 
 export interface LoadProjectResult {

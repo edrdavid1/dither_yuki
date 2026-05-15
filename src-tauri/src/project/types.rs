@@ -1,5 +1,6 @@
 // .dyproj project manifest types — shared between save/load/protocol layers
 
+use crate::video_runtime::types::LayerTrack as VideoLayerTrack;
 use serde::{Deserialize, Serialize};
 
 /// Top-level project manifest stored as `manifest.json` inside the .dyproj ZIP.
@@ -18,6 +19,8 @@ pub struct DyprojManifest {
     pub palettes: Vec<Palette>,
     pub assets: Vec<AssetRecord>,
     pub animation: Option<AnimationData>,
+    #[serde(default)]
+    pub video_layer_tracks: Vec<VideoLayerTrack>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -134,7 +137,7 @@ mod tests {
         let manifest: DyprojManifest = serde_json::from_str(json).expect("failed to deserialize");
         assert_eq!(manifest.version, "1.0");
         assert_eq!(manifest.layers.len(), 1);
-        let anim = manifest.animation.unwrap();
+        let anim = manifest.animation.as_ref().unwrap();
         assert_eq!(anim.tracks.len(), 1);
         assert_eq!(anim.tracks[0].keyframes.len(), 2);
 

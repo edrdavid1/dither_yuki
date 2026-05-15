@@ -19,7 +19,80 @@ use crate::image_engine::{
     VideoFrameBatchResult,
 };
 
-const DEFAULT_FPS: f64 = 30.0;
+pub const DEFAULT_FPS: f64 = 30.0;
+
+pub fn check_ffmpeg_presence() -> Result<(), String> {
+    let ffmpeg = resolve_media_binary_path("ffmpeg")?;
+    let output = Command::new(&ffmpeg)
+        .arg("-version")
+        .output()
+        .map_err(|_| format!("FFmpeg is not installed or not available at {}. Please install FFmpeg to use video features.", ffmpeg.display()))?;
+    
+    if !output.status.success() {
+        return Err("FFmpeg found but returned error when checking version.".to_string());
+    }
+    Ok(())
+}
+
+pub fn check_ffprobe_presence() -> Result<(), String> {
+    let ffprobe = resolve_media_binary_path("ffprobe")?;
+    let output = Command::new(&ffprobe)
+        .arg("-version")
+        .output()
+        .map_err(|_| format!("FFprobe is not installed or not available at {}. Please install FFmpeg (which includes ffprobe) to use video features.", ffprobe.display()))?;
+    
+    if !output.status.success() {
+        return Err("FFprobe found but returned error when checking version.".to_string());
+    }
+    Ok(())
+}
+
+/// Validate that a video file can be decoded by FFmpeg before starting live playback.
+///
+/// This runs a decode-to-null pass with error-level logging only, so corrupted
+/// files surface as an immediate error instead of being accepted into playback.
+pub fn validate_video_playback_source(input_path: &Path) -> Result<(), String> {
+    check_ffmpeg_presence()?;
+
+    if !input_path.is_file() {
+        return Err(format!("Playback source does not exist or is not a file: {}", input_path.display()));
+    }
+
+    let ffmpeg = resolve_media_binary_path("ffmpeg")?;
+    let input = input_path
+        .to_str()
+        .ok_or_else(|| format!("Invalid UTF-8 in playback source path: {}", input_path.display()))?;
+
+    let output = Command::new(&ffmpeg)
+        .args(["-v", "error", "-i", input, "-f", "null", "-"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|error| format!("Failed to run FFmpeg preflight decode for {}: {}", input_path.display(), error))?;
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if output.status.success() {
+        if !stderr.is_empty() {
+            log::warn!("[validate_video_playback_source] Video file has non-fatal decoding warnings: {}", stderr);
+        }
+        return Ok(());
+    }
+
+    let status_desc = output
+        .status
+        .code()
+        .map(|code| format!("exit code {code}"))
+        .unwrap_or_else(|| "terminated by signal".to_string());
+
+    if stderr.is_empty() {
+        Err(format!(
+            "Video file failed FFmpeg preflight decode check ({status_desc}) for {}",
+            input_path.display()
+        ))
+    } else {
+        Err(format!("Video file has fatal decoding errors ({}): {}", status_desc, stderr))
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DependencyStatus {
@@ -41,12 +114,12 @@ pub struct VideoEncodingOptions {
 }
 
 #[derive(Debug, Clone)]
-struct ResolvedVideoEncodingOptions {
-    fps: f64,
-    codec: String,
-    preset: Option<String>,
-    crf: Option<u8>,
-    pix_fmt: String,
+pub struct ResolvedVideoEncodingOptions {
+    pub fps: f64,
+    pub codec: String,
+    pub preset: Option<String>,
+    pub crf: Option<u8>,
+    pub pix_fmt: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -772,7 +845,7 @@ fn run_still_animation_job(
     Ok(())
 }
 
-fn extract_frames_to_png(job_id: &str, input: &Path, output_dir: &Path) -> Result<(), String> {
+pub fn extract_frames_to_png(job_id: &str, input: &Path, output_dir: &Path) -> Result<(), String> {
     run_ffmpeg(&[
         "-y",
         "-i",
@@ -790,7 +863,7 @@ fn extract_frames_to_png(job_id: &str, input: &Path, output_dir: &Path) -> Resul
     ], Some(job_id))
 }
 
-fn encode_video_from_png(
+pub fn encode_video_from_png(
     job_id: &str,
     source_video: &Path,
     frames_dir: &Path,
@@ -1182,6 +1255,138 @@ fn resolve_binary_path(binary: &str) -> Result<PathBuf, String> {
     Ok(PathBuf::from(binary))
 }
 
+pub fn resolve_media_binary_path(binary: &str) -> Result<PathBuf, String> {
+    resolve_binary_path(binary)
+}
+
+pub fn build_video_proxy(
+    input_path: &Path,
+    output_path: &Path,
+    target_width: u32,
+    target_height: u32,
+) -> Result<(), String> {
+    if let Ok(metadata) = fs::metadata(output_path) {
+        if metadata.is_file() && metadata.len() > 0 {
+            let output_str = output_path
+                .to_str()
+                .ok_or_else(|| format!("Invalid UTF-8 in proxy output path: {}", output_path.display()))?;
+
+            match probe_video_file_metadata(output_str) {
+                Ok(proxy_meta) => {
+                    if proxy_meta.width == target_width && proxy_meta.height == target_height {
+                        let ffmpeg = resolve_media_binary_path("ffmpeg")?;
+                        let decode_status = Command::new(&ffmpeg)
+                            .args([
+                                "-v",
+                                "error",
+                                "-i",
+                                output_str,
+                                "-frames:v",
+                                "1",
+                                "-f",
+                                "null",
+                                "-",
+                            ])
+                            .status();
+
+                        match decode_status {
+                            Ok(status) if status.success() => {
+                                return Ok(());
+                            }
+                            Ok(status) => {
+                                log::warn!(
+                                    "[build_video_proxy] Existing proxy failed first-frame decode check (status={}). Rebuilding {}",
+                                    status,
+                                    output_path.display()
+                                );
+                                let _ = fs::remove_file(output_path);
+                            }
+                            Err(error) => {
+                                log::warn!(
+                                    "[build_video_proxy] Existing proxy decode check failed to run ffmpeg ({}). Rebuilding {}",
+                                    error,
+                                    output_path.display()
+                                );
+                                let _ = fs::remove_file(output_path);
+                            }
+                        }
+                    }
+
+                    log::warn!(
+                        "[build_video_proxy] Existing proxy has unexpected dimensions (got {}x{}, expected {}x{}). Rebuilding {}",
+                        proxy_meta.width,
+                        proxy_meta.height,
+                        target_width,
+                        target_height,
+                        output_path.display()
+                    );
+                    let _ = fs::remove_file(output_path);
+                }
+                Err(error) => {
+                    log::warn!(
+                        "[build_video_proxy] Existing proxy is not readable by ffprobe ({}). Rebuilding {}",
+                        error,
+                        output_path.display()
+                    );
+                    let _ = fs::remove_file(output_path);
+                }
+            }
+        }
+    }
+
+    if let Some(parent) = output_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create proxy output dir {}: {e}", parent.display()))?;
+    }
+
+    let ffmpeg = resolve_media_binary_path("ffmpeg")?;
+    let input = input_path
+        .to_str()
+        .ok_or_else(|| format!("Invalid UTF-8 in proxy input path: {}", input_path.display()))?;
+    let output = output_path
+        .to_str()
+        .ok_or_else(|| format!("Invalid UTF-8 in proxy output path: {}", output_path.display()))?;
+    let scale_filter = format!("scale={}:{}:flags=neighbor", target_width, target_height);
+
+    let status = Command::new(&ffmpeg)
+        .args([
+            "-y",
+            "-i",
+            input,
+            "-vf",
+            &scale_filter,
+            "-an",
+            "-sn",
+            "-dn",
+            "-movflags",
+            "+faststart",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "fast",
+            "-crf",
+            "23",
+            "-pix_fmt",
+            "yuv420p",
+            "-x264-params",
+            "nal-hrd=none:bframes=0",
+            output,
+        ])
+        .status()
+        .map_err(|e| format!("Failed to execute ffmpeg for proxy generation: {e}"))?;
+
+    if status.success() {
+        return Ok(());
+    }
+
+    let _ = fs::remove_file(output_path);
+    Err(format!(
+        "ffmpeg proxy generation failed for {} → {}",
+        input_path.display(),
+        output_path.display()
+    ))
+}
+
 fn resolve_sidecar_path(binary: &str) -> Option<PathBuf> {
     // Tauri v2 keeps sidecars near executable/resources depending on target.
     // We probe the common runtime bundle locations first.
@@ -1318,7 +1523,7 @@ fn mark_cancelled_if_requested(job_id: &str, current: usize, total: usize) -> Re
     Ok(true)
 }
 
-fn resolve_encoding_options(
+pub fn resolve_encoding_options(
     provided: Option<VideoEncodingOptions>,
     fallback_fps: f64,
 ) -> Result<ResolvedVideoEncodingOptions, String> {
@@ -1390,7 +1595,7 @@ fn format_fps(fps: f64) -> String {
     format!("{:.6}", fps)
 }
 
-fn probe_video_fps(path: &Path) -> Result<f64, String> {
+pub fn probe_video_fps(path: &Path) -> Result<f64, String> {
     let input = path
         .to_str()
         .ok_or_else(|| "Invalid UTF-8 in input path".to_string())?;
@@ -1575,7 +1780,7 @@ fn next_job_id() -> String {
     format!("video-job-{ts}-{n}")
 }
 
-fn list_png_files_sorted(dir: &Path) -> Result<Vec<PathBuf>, String> {
+pub fn list_png_files_sorted(dir: &Path) -> Result<Vec<PathBuf>, String> {
     let mut files = Vec::new();
     let read = fs::read_dir(dir)
         .map_err(|e| format!("Failed to read frame dir {}: {e}", dir.display()))?;
@@ -1597,7 +1802,7 @@ fn list_png_files_sorted(dir: &Path) -> Result<Vec<PathBuf>, String> {
     Ok(files)
 }
 
-fn read_png_rgba(path: &Path) -> Result<(u32, u32, Vec<u8>), String> {
+pub fn read_png_rgba(path: &Path) -> Result<(u32, u32, Vec<u8>), String> {
     let img = image::open(path)
         .map_err(|e| format!("Failed to open image {}: {e}", path.display()))?;
     let rgba = img.to_rgba8();
@@ -1605,7 +1810,7 @@ fn read_png_rgba(path: &Path) -> Result<(u32, u32, Vec<u8>), String> {
     Ok((w, h, rgba.into_raw()))
 }
 
-fn write_png_rgba(path: &Path, width: u32, height: u32, rgba: &[u8]) -> Result<(), String> {
+pub fn write_png_rgba(path: &Path, width: u32, height: u32, rgba: &[u8]) -> Result<(), String> {
     let expected_len = (width as usize)
         .checked_mul(height as usize)
         .and_then(|px| px.checked_mul(4))
@@ -1663,44 +1868,8 @@ mod tests {
                 algorithm: "Bayer 2x2".to_string(),
                 enabled: true,
                 intensity: 50.0,
-                blend_mode: None,
-                opacity: None,
                 palette_name: Some("Grayscale".to_string()),
-                palette: None,
-                contrast: None,
-                brightness: None,
-                saturation: None,
-                pixel_size: None,
-                blur: None,
-                sharpness: None,
-                noise: None,
-                glitch_type: None,
-                sort_by: None,
-                masking: None,
-                threshold_min: None,
-                threshold_max: None,
-                direction_angle: None,
-                sort_length: None,
-                block_size: None,
-                chaos: None,
-                quantization: None,
-                red_shift_x: None,
-                red_shift_y: None,
-                green_shift_x: None,
-                green_shift_y: None,
-                blue_shift_x: None,
-                blue_shift_y: None,
-                global_rgb_shift_intensity: None,
-                slice_count: None,
-                max_offset: None,
-                randomness: None,
-                scanline_thickness: None,
-                scanline_gap: None,
-                flicker: None,
-                curvature: None,
-                snap_to_palette: None,
-                palette_mix: None,
-                global_seed: None,
+                ..Default::default()
             }],
             temporal: None,
             tracks: None,
@@ -1788,44 +1957,8 @@ mod tests {
                 algorithm: "Bayer 2x2".to_string(),
                 enabled: true,
                 intensity: 72.0,
-                blend_mode: None,
-                opacity: None,
                 palette_name: Some("Grayscale".to_string()),
-                palette: None,
-                contrast: None,
-                brightness: None,
-                saturation: None,
-                pixel_size: None,
-                blur: None,
-                sharpness: None,
-                noise: None,
-                glitch_type: None,
-                sort_by: None,
-                masking: None,
-                threshold_min: None,
-                threshold_max: None,
-                direction_angle: None,
-                sort_length: None,
-                block_size: None,
-                chaos: None,
-                quantization: None,
-                red_shift_x: None,
-                red_shift_y: None,
-                green_shift_x: None,
-                green_shift_y: None,
-                blue_shift_x: None,
-                blue_shift_y: None,
-                global_rgb_shift_intensity: None,
-                slice_count: None,
-                max_offset: None,
-                randomness: None,
-                scanline_thickness: None,
-                scanline_gap: None,
-                flicker: None,
-                curvature: None,
-                snap_to_palette: None,
-                palette_mix: None,
-                global_seed: None,
+                ..Default::default()
             }],
             temporal: None,
             tracks: None,

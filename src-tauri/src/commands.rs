@@ -1,11 +1,38 @@
 // Tauri commands for image processing
 
 use crate::image_engine::{self, AlgorithmRegistry, ImageData};
+use crate::video_runtime;
+use crate::video_runtime::types::{
+    VideoFrameRequestV1,
+    VideoFrameResponseV1,
+    VideoFrameResponseMetaV1,
+    VideoPreviewSessionRequestV1,
+    VideoPreviewSessionResponseV1,
+    VideoRenderJobRequestV1,
+    VideoRenderJobResponseV1,
+};
 use crate::video_processing;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+fn sync_playback_streams_to_frame(frame: usize) {
+    for entry in video_runtime::services::playback_streams().iter() {
+        let stream = entry.value();
+        let pts = frame as f64 / stream.fps;
+        stream.seek(pts);
+    }
+}
+
+#[tauri::command]
+pub async fn generate_video_thumbnails(
+    path: String,
+    count: usize,
+    width: u32,
+    height: u32,
+) -> Result<Vec<Vec<u8>>, String> {
+    video_runtime::decode::generate_thumbnails(&path, count, width, height)
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PatternPresetExportRequest {
     pub name: String,
@@ -673,6 +700,18 @@ pub async fn probe_video_file_metadata(
 }
 
 #[tauri::command]
+pub async fn prepare_video_preview_session(
+    request: VideoPreviewSessionRequestV1,
+) -> Result<VideoPreviewSessionResponseV1, String> {
+    video_runtime::preview_session::prepare_preview_session(request)
+}
+
+#[tauri::command]
+pub async fn release_video_preview_session(video_id: String) -> Result<(), String> {
+    video_runtime::preview_session::release_preview_session(&video_id)
+}
+
+#[tauri::command]
 pub async fn check_dependencies() -> Result<video_processing::DependencyStatus, String> {
     Ok(video_processing::check_dependencies())
 }
@@ -708,6 +747,11 @@ pub async fn export_video_frames_pack_from_dir(
 #[tauri::command]
 pub async fn get_default_output_path(file_name: String) -> Result<String, String> {
     Ok(resolve_default_output_path(&file_name)?.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub async fn get_temp_output_path(file_name: String) -> Result<String, String> {
+    Ok(resolve_temp_output_path(&file_name)?.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -752,8 +796,265 @@ pub async fn read_bytes_from_path(file_path: String) -> Result<Vec<u8>, String> 
     fs::read(&input).map_err(|e| format!("Failed to read file {}: {e}", input.display()))
 }
 
-fn resolve_default_output_path(file_name: &str) -> Result<PathBuf, String> {
-    let sanitized = file_name
+#[tauri::command]
+pub async fn get_filtered_frame_v2(
+    app_handle: tauri::AppHandle,
+    request: VideoFrameRequestV1,
+) -> Result<VideoFrameResponseV1, String> {
+    video_runtime::scheduler_service().submit_interactive(request, Some(&app_handle))
+}
+
+#[tauri::command]
+pub async fn get_filtered_frame_binary_v2(
+    request: VideoFrameRequestV1,
+) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let response = video_runtime::scheduler_service().submit_interactive(request, None)?;
+
+        let meta = serde_json::to_string(&VideoFrameResponseMetaV1 {
+            version: 1,
+            video_id: response.video_id,
+            frame_index: response.frame_index,
+            width: response.width,
+            height: response.height,
+            cache_hit: response.cache_hit,
+            processing_ms: response.processing_ms,
+            backend_used: response.backend_used,
+            fallback_used: response.fallback_used,
+            requested_index: response.requested_index,
+            produced_index: response.produced_index,
+            ffmpeg_errors: response.ffmpeg_errors,
+            stream_status: response.stream_status,
+            pts: response.pts,
+            transport_request_id: None,
+        })
+        .map_err(|e| format!("Failed to serialize metadata: {e}"))?;
+
+        let meta_bytes = meta.as_bytes();
+        let meta_len = meta_bytes.len() as u32;
+
+        let mut out = Vec::with_capacity(4 + meta_bytes.len() + response.rgba.len());
+        out.extend_from_slice(&meta_len.to_le_bytes());
+        out.extend_from_slice(meta_bytes);
+        out.extend_from_slice(&response.rgba);
+
+        Ok(tauri::ipc::Response::new(out))
+    })
+    .await
+    .map_err(|e| format!("Task failed: {}", e))?
+}
+
+
+#[tauri::command]
+pub async fn pull_next_playback_frame_binary(
+    video_id: String,
+) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let response = video_runtime::api::pull_next_playback_frame_binary(&video_id)?;
+
+        let meta = serde_json::to_string(&VideoFrameResponseMetaV1 {
+            version: 1,
+            video_id: response.video_id,
+            frame_index: response.frame_index,
+            width: response.width,
+            height: response.height,
+            cache_hit: response.cache_hit,
+            processing_ms: response.processing_ms,
+            backend_used: response.backend_used,
+            fallback_used: response.fallback_used,
+            requested_index: response.requested_index,
+            produced_index: response.produced_index,
+            ffmpeg_errors: response.ffmpeg_errors,
+            stream_status: response.stream_status,
+            pts: response.pts,
+            transport_request_id: None,
+        })
+        .map_err(|e| format!("Failed to serialize metadata: {e}"))?;
+
+        let meta_bytes = meta.as_bytes();
+        let meta_len = meta_bytes.len() as u32;
+
+        let mut out = Vec::with_capacity(4 + meta_bytes.len() + response.rgba.len());
+        out.extend_from_slice(&meta_len.to_le_bytes());
+        out.extend_from_slice(meta_bytes);
+        out.extend_from_slice(&response.rgba);
+
+        Ok(tauri::ipc::Response::new(out))
+    })
+    .await
+    .map_err(|e| format!("Task failed: {}", e))?
+}
+
+#[tauri::command]
+pub async fn open_playback_stream(
+    video_id: String,
+    input_path: String,
+    fps: f64,
+    width: u32,
+    height: u32,
+    layer_payload: Vec<image_engine::EffectLayer>,
+    layer_tracks: Vec<video_runtime::types::LayerTrack>,
+    layer_snapshot_hash: String,
+    quality_mode: Option<String>,
+    scale: Option<f32>,
+) -> Result<video_runtime::types::VideoPreviewSessionResponseV1, String> {
+    video_runtime::api::open_playback_stream(
+        video_id,
+        input_path,
+        fps,
+        width,
+        height,
+        layer_payload,
+        layer_tracks,
+        layer_snapshot_hash,
+        quality_mode,
+        scale,
+    )
+}
+
+#[tauri::command]
+pub async fn close_playback_stream(video_id: String) -> Result<(), String> {
+    video_runtime::api::close_playback_stream(&video_id)
+}
+
+#[tauri::command]
+pub async fn update_playback_effect_params(
+    video_id: String,
+    layer_payload: Vec<image_engine::EffectLayer>,
+    layer_tracks: Vec<video_runtime::types::LayerTrack>,
+    layer_snapshot_hash: String,
+    quality_mode: Option<String>,
+    scale: Option<f32>,
+) -> Result<(), String> {
+    video_runtime::api::update_playback_effect_params(
+        video_id,
+        layer_payload,
+        layer_tracks,
+        layer_snapshot_hash,
+        quality_mode,
+        scale,
+    )
+}
+
+#[tauri::command]
+pub async fn render_video_job_v2(request: VideoRenderJobRequestV1) -> Result<VideoRenderJobResponseV1, String> {
+    video_runtime::scheduler_service().submit_export(request)
+}
+
+#[tauri::command]
+pub async fn cancel_video_job_v2(job_id: String) -> Result<VideoRenderJobResponseV1, String> {
+    video_runtime::cancel_video_job_v2(&job_id)
+}
+
+#[tauri::command]
+pub async fn get_video_job_progress_v2(job_id: String) -> Result<VideoRenderJobResponseV1, String> {
+    video_runtime::get_video_job_progress_v2(&job_id)
+}
+
+#[tauri::command]
+pub async fn list_video_jobs_v2() -> Result<Vec<VideoRenderJobResponseV1>, String> {
+    Ok(video_runtime::list_video_jobs_v2())
+}
+
+#[tauri::command]
+pub async fn update_filter_params_v2() -> Result<(), String> {
+    video_runtime::update_filter_params_v2();
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_scheduler_state() -> Result<video_runtime::SchedulerState, String> {
+    Ok(video_runtime::scheduler_service().get_state())
+}
+
+// ---------------------------------------------------------------------------
+// Transport / Master Clock commands (Requirements 2.2, 2.3, 2.4, 2.8)
+// ---------------------------------------------------------------------------
+
+/// Start playback. Configures FPS, in/out points, and total frame count, then
+/// sends a Play signal to the MasterClockService.
+#[tauri::command]
+pub async fn transport_play(
+    app_handle: tauri::AppHandle,
+    fps: f64,
+    in_frame: usize,
+    out_frame: usize,
+    total_frames: usize,
+) -> Result<video_runtime::TransportState, String> {
+    // Lazily initialize the clock service if it hasn't been set up yet.
+    video_runtime::init_clock_service(app_handle);
+    let clock = video_runtime::clock_service();
+    clock.set_fps(fps);
+    clock.set_in_out(in_frame, out_frame);
+    clock.set_total_frames(total_frames);
+    // Do NOT seek the playback stream here — the stream is already buffering
+    // from the current position. Seeking would restart FFmpeg and cause a
+    // 0.5–1s stall before the first frame appears.
+    // The stream drives the clock via update_frame_from_stream on each pull.
+    clock.play();
+    Ok(clock.get_state())
+}
+
+/// Pause playback.
+#[tauri::command]
+pub async fn transport_pause() -> Result<(), String> {
+    video_runtime::clock_service().pause();
+    Ok(())
+}
+
+/// Seek to a specific frame.
+#[tauri::command]
+pub async fn transport_seek(frame: usize) -> Result<(), String> {
+    let clock = video_runtime::clock_service();
+    clock.seek(frame);
+    sync_playback_streams_to_frame(clock.get_state().frame);
+    Ok(())
+}
+
+/// Enable or disable loop mode.
+#[tauri::command]
+pub async fn transport_set_loop(enabled: bool) -> Result<(), String> {
+    video_runtime::clock_service().set_loop(enabled);
+    Ok(())
+}
+
+/// Return the current transport state snapshot.
+#[tauri::command]
+pub async fn get_transport_state() -> Result<video_runtime::TransportState, String> {
+    Ok(video_runtime::clock_service().get_state())
+}
+
+/// Initialize the clock service explicitly (called from app setup).
+#[tauri::command]
+pub async fn init_clock(app_handle: tauri::AppHandle) -> Result<(), String> {
+    video_runtime::init_clock_service(app_handle);
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Audio sync commands (Requirements 4.1–4.7)
+// ---------------------------------------------------------------------------
+
+/// Extract audio from the given video file and load it into the AudioSyncService.
+/// If FFmpeg is unavailable or extraction fails, the service operates in
+/// video-only mode (Requirement 4.7).
+#[tauri::command]
+pub async fn load_audio_for_video(video_id: String, input_path: String) -> Result<(), String> {
+    video_runtime::audio_service()
+        .load_audio(&video_id, &input_path)
+        .map_err(|e| {
+            log::warn!("[load_audio_for_video] Audio load failed (video-only mode): {e}");
+            e
+        })
+}
+
+/// Return the current audio sync state.
+#[tauri::command]
+pub async fn get_audio_sync_state() -> Result<video_runtime::AudioSyncState, String> {
+    Ok(video_runtime::audio_service().get_state())
+}
+
+fn resolve_default_output_path(file_name: &str) -> Result<PathBuf, String> {    let sanitized = file_name
         .trim()
         .chars()
         .map(|ch| if matches!(ch, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') { '_' } else { ch })
@@ -782,6 +1083,32 @@ fn resolve_default_output_path(file_name: &str) -> Result<PathBuf, String> {
             .map_err(|fallback_err| format!("Failed to create output dirs: {err}; fallback error: {fallback_err}"))?;
         base = temp;
     }
+
+    Ok(base.join(file_name))
+}
+
+fn resolve_temp_output_path(file_name: &str) -> Result<PathBuf, String> {
+    let sanitized = file_name
+        .trim()
+        .chars()
+        .map(|ch| if matches!(ch, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') { '_' } else { ch })
+        .collect::<String>();
+
+    let file_name = if sanitized.is_empty() {
+        format!(
+            "dither-yuki-input-{}.bin",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0)
+        )
+    } else {
+        sanitized
+    };
+
+    let base = std::env::temp_dir().join("dither-yuki-inputs");
+    std::fs::create_dir_all(&base)
+        .map_err(|e| format!("Failed to create temp staging dir {}: {e}", base.display()))?;
 
     Ok(base.join(file_name))
 }

@@ -4,6 +4,9 @@ import { Expand, Image, Minus, Plus, Search } from "pixelarticons/react";
 interface PreviewPanelProps {
   originalImage: HTMLImageElement | null;
   processedImage: HTMLImageElement | null;
+  originalRgba?: { width: number; height: number; rgba: Uint8ClampedArray } | null;
+  processedRgba?: { width: number; height: number; rgba: Uint8ClampedArray } | null;
+  processingMs?: number | null;
   showOriginal: boolean;
   setShowOriginal: (value: boolean) => void;
   isAnimationMode?: boolean;
@@ -20,6 +23,9 @@ interface PreviewPanelProps {
 export const PreviewPanel = ({ 
   originalImage, 
   processedImage,
+  originalRgba = null,
+  processedRgba = null,
+  processingMs = null,
   showOriginal,
   setShowOriginal,
   isAnimationMode = false,
@@ -33,6 +39,26 @@ export const PreviewPanel = ({
   onFileDrop,
 }: PreviewPanelProps) => {
   const [dragOver, setDragOver] = useState(false);
+  const selectedRgbaSurface = showOriginal ? originalRgba : (processedRgba ?? originalRgba);
+  const imageSurface = showOriginal ? (originalImage ?? processedImage) : (processedImage ?? originalImage);
+
+  const isValidRgbaSurface = Boolean(
+    selectedRgbaSurface &&
+      selectedRgbaSurface.width > 0 &&
+      selectedRgbaSurface.height > 0 &&
+      selectedRgbaSurface.rgba.length === selectedRgbaSurface.width * selectedRgbaSurface.height * 4,
+  );
+
+  const safeRgbaSurface = isValidRgbaSurface ? selectedRgbaSurface : null;
+
+  const hasRgbaSurface = Boolean(safeRgbaSurface);
+  const hasImageSurface = Boolean(imageSurface);
+  const hasPreviewSurface = hasRgbaSurface || hasImageSurface;
+  const previewDimensions = hasRgbaSurface
+    ? `${safeRgbaSurface?.width ?? 0}×${safeRgbaSurface?.height ?? 0}`
+    : hasImageSurface
+      ? `${imageSurface?.width ?? 0}×${imageSurface?.height ?? 0}`
+      : "No preview surface yet";
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -54,21 +80,22 @@ export const PreviewPanel = ({
 
   const fitToWindow = useCallback(() => {
     const container = containerRef.current;
-    const imageToShow = showOriginal ? originalImage : processedImage;
-    if (!container || !imageToShow) {
+    const width = safeRgbaSurface?.width ?? imageSurface?.width;
+    const height = safeRgbaSurface?.height ?? imageSurface?.height;
+    if (!container || !width || !height) {
       setZoom(1);
       return;
     }
 
     const padding = 40;
-    const widthRatio = (container.clientWidth - padding) / imageToShow.width;
-    const heightRatio = (container.clientHeight - padding) / imageToShow.height;
+    const widthRatio = (container.clientWidth - padding) / width;
+    const heightRatio = (container.clientHeight - padding) / height;
     const nextZoom = Math.max(0.25, Math.min(4, Math.min(widthRatio, heightRatio, 1)));
     setZoom(Number.isFinite(nextZoom) ? nextZoom : 1);
-  }, [originalImage, processedImage, showOriginal]);
+  }, [imageSurface?.height, imageSurface?.width, safeRgbaSurface?.height, safeRgbaSurface?.width]);
 
   useEffect(() => {
-    if (!originalImage && !processedImage) {
+    if (!originalImage && !processedImage && !originalRgba && !processedRgba) {
       hasManualZoomRef.current = false;
       setZoom(1);
       return;
@@ -77,7 +104,7 @@ export const PreviewPanel = ({
     if (!hasManualZoomRef.current) {
       fitToWindow();
     }
-  }, [fitToWindow, originalImage, processedImage, showOriginal]);
+  }, [fitToWindow, originalImage, originalRgba, processedImage, processedRgba, showOriginal]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -86,12 +113,25 @@ export const PreviewPanel = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const imageToShow = showOriginal ? originalImage : processedImage;
-    
-    if (imageToShow) {
-      canvas.width = imageToShow.width;
-      canvas.height = imageToShow.height;
-      ctx.drawImage(imageToShow, 0, 0);
+    if (safeRgbaSurface) {
+      try {
+        canvas.width = safeRgbaSurface.width;
+        canvas.height = safeRgbaSurface.height;
+        // Use any to avoid complex TS issues with SharedArrayBuffer in some environments
+        const imageData = new ImageData(safeRgbaSurface.rgba as any, safeRgbaSurface.width, safeRgbaSurface.height);
+        ctx.putImageData(imageData, 0, 0);
+      } catch (error) {
+        console.warn("[preview] Failed to draw RGBA surface, falling back to image surface", error);
+        if (imageSurface) {
+          canvas.width = imageSurface.width;
+          canvas.height = imageSurface.height;
+          ctx.drawImage(imageSurface, 0, 0);
+        }
+      }
+    } else if (imageSurface) {
+      canvas.width = imageSurface.width;
+      canvas.height = imageSurface.height;
+      ctx.drawImage(imageSurface, 0, 0);
     } else {
       // Clear canvas and show placeholder
       canvas.width = 800;
@@ -103,7 +143,7 @@ export const PreviewPanel = ({
       ctx.textAlign = 'center';
       ctx.fillText('No image loaded', canvas.width / 2, canvas.height / 2);
     }
-  }, [originalImage, processedImage, showOriginal]);
+  }, [imageSurface, safeRgbaSurface]);
 
   useEffect(() => {
     const handleResize = () => fitToWindow();
@@ -111,10 +151,29 @@ export const PreviewPanel = ({
     return () => window.removeEventListener('resize', handleResize);
   }, [fitToWindow]);
 
-  const imageToShow = showOriginal ? originalImage : processedImage;
-
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-1">
+      <div className="win95-panel flex flex-wrap items-center justify-between gap-1 px-2 py-1">
+        <div className="flex items-center gap-2">
+          <span className="win98-badge">
+            Preview
+          </span>
+          <span className="text-[10px] text-muted-foreground">
+            {hasPreviewSurface ? (animationPlaying ? "Playing frame sequence" : "Live canvas") : "No source loaded"}
+          </span>
+        </div>
+        <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+          {processingMs !== null && (
+            <span className="win95-border-inset px-2 py-0.5 font-mono text-[10px]">
+              {processingMs.toFixed(1)}ms
+            </span>
+          )}
+          <span className="win95-border-inset px-2 py-0.5 font-mono text-[10px]">
+            {previewDimensions}
+          </span>
+        </div>
+      </div>
+
       <div
         ref={containerRef}
         className={`win98-scroll-area win98-scroll flex-1 win95-border-inset bg-white/90 p-1 relative transition-colors${dragOver ? " !bg-blue-50 outline-2 outline-dashed outline-[#000080]" : ""}`}
@@ -124,16 +183,19 @@ export const PreviewPanel = ({
       >
         {dragOver && (
           <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black/10">
-            <span className="win98-badge text-sm px-4 py-2">Drop to open</span>
+            <span className="win98-badge text-sm px-4 py-2">
+              Drop to open
+            </span>
           </div>
         )}
-        {imageToShow ? (
+        {hasPreviewSurface ? (
           <div className="flex min-h-full min-w-full items-start justify-start">
             <canvas 
               ref={canvasRef}
               className="max-w-full h-auto bg-white"
               style={{ 
                 imageRendering: 'pixelated',
+                display: 'block',
                 transform: `scale(${zoom})`,
                 transformOrigin: 'top left'
               }}
@@ -141,7 +203,9 @@ export const PreviewPanel = ({
           </div>
         ) : (
           <div className="win98-empty-state">
-            <div className="win98-badge"><Image className="h-3 w-3" /> No image</div>
+            <div className="win98-badge">
+              <Image className="h-3 w-3" /> No media loaded
+            </div>
             <div className="text-sm font-bold text-foreground">Drop an image or video here</div>
             <p className="text-[10px] text-muted-foreground">or use File → Open</p>
           </div>
@@ -149,7 +213,12 @@ export const PreviewPanel = ({
       </div>
       
       <div className="win95-panel flex flex-wrap gap-1 justify-between">
-        <div className="flex gap-1">
+        <div className="flex gap-1 items-center">
+          {processingMs !== null && (
+            <span className="win95-border-inset px-2 py-0.5 font-mono text-[10px]">
+              {processingMs.toFixed(1)}ms
+            </span>
+          )}
           <button 
             className={`win95-button text-[11px] px-2 py-0.5 ${showOriginal ? 'bg-primary text-primary-foreground' : ''}`}
             onClick={() => setShowOriginal(true)}
@@ -212,7 +281,9 @@ export const PreviewPanel = ({
           >
             <Minus className="h-3 w-3" />
           </button>
-          <span className="win95-button p-0.5 px-2 text-[11px]">{Math.round(zoom * 100)}%</span>
+          <span className="win95-button p-0.5 px-2 text-[11px]">
+            {Math.round(zoom * 100)}%
+          </span>
           <button 
             className="win95-button p-0.5 px-1.5"
             onClick={() => {
@@ -237,7 +308,7 @@ export const PreviewPanel = ({
 
         <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
           <Search className="h-3 w-3" />
-          {imageToShow ? `${imageToShow.width}×${imageToShow.height} preview surface` : "No preview surface yet"}
+          {previewDimensions}
         </div>
       </div>
     </div>

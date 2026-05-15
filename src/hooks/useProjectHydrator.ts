@@ -3,7 +3,9 @@ import type { Dispatch, RefObject, SetStateAction } from "react";
 import { toast } from "sonner";
 import { type AnimationFrame } from "@/types/animationFrame";
 import { type Layer, cloneLayers, createNeutralLayer } from "@/types/layers";
+import { cloneLayerTracks, type LayerTrack } from "@/lib/videoRuntime/layerTracks";
 import { useProjectStore } from "@/store/projectStore";
+import { useVideoPlaybackStore } from "@/store/videoPlaybackStore";
 import { encodeFilmstripProjectData, decodeFilmstripProjectData } from "@/lib/animation/filmstripPersistence";
 import { getNativeFilePath } from "@/lib/mediaWorkflow";
 import { readBytesFromPath, safeTauriInvoke, pickSaveProjectPath, pickOpenProjectPath } from "@/lib/tauriBridge";
@@ -31,19 +33,19 @@ const rgbToHex = (rgb: [number, number, number]) => {
   return `#${clamp(r).toString(16).padStart(2, "0")}${clamp(g).toString(16).padStart(2, "0")}${clamp(b).toString(16).padStart(2, "0")}`;
 };
 
-const loadImageFromBytes = (bytes: Uint8Array): Promise<HTMLImageElement> => {
+const loadImageFromBytes = async (bytes: Uint8Array): Promise<HTMLImageElement> => {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(new Error("Failed to encode image bytes"));
+    reader.readAsDataURL(new Blob([bytes as unknown as BlobPart]));
+  });
+
   return new Promise((resolve, reject) => {
     const image = new Image();
-    const objectUrl = URL.createObjectURL(new Blob([bytes as unknown as BlobPart]));
-    image.onload = () => {
-      URL.revokeObjectURL(objectUrl);
-      resolve(image);
-    };
-    image.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
-      reject(new Error("Failed to load image from bytes"));
-    };
-    image.src = objectUrl;
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Failed to load image from bytes"));
+    image.src = dataUrl;
   });
 };
 
@@ -65,6 +67,9 @@ export interface UseProjectHydratorArgs {
   setVideoMetadata: Dispatch<SetStateAction<VideoMetadataLike | null>>;
   setVideoPreviewFrames: Dispatch<SetStateAction<VideoPreviewFrame[]>>;
   setSelectedVideoPreviewFrame: Dispatch<SetStateAction<number>>;
+  setVideoLayerTracks: Dispatch<SetStateAction<LayerTrack[]>>;
+  clearVideoMediaState?: () => Promise<void>;
+  loadVideoFile?: (file: File) => Promise<void>;
   setFrames: Dispatch<SetStateAction<AnimationFrame[]>>;
   setSelectedFrameIndex: Dispatch<SetStateAction<number>>;
   setSelectedFrameIds: Dispatch<SetStateAction<Set<string>>>;
@@ -107,6 +112,9 @@ export function useProjectHydrator(args: UseProjectHydratorArgs): UseProjectHydr
     setVideoMetadata,
     setVideoPreviewFrames,
     setSelectedVideoPreviewFrame,
+    setVideoLayerTracks,
+    clearVideoMediaState,
+    loadVideoFile,
     setFrames,
     setSelectedFrameIndex,
     setSelectedFrameIds,
@@ -138,13 +146,16 @@ export function useProjectHydrator(args: UseProjectHydratorArgs): UseProjectHydr
     return defaultLayer;
   }, [applyLayerSnapshotToControls, setActiveLayerId, setLayers]);
 
-  const handleNewProject = useCallback(() => {
+  const handleNewProject = useCallback(async () => {
     newProject("Untitled Project");
+    await clearVideoMediaState?.();
     setSourceImageFile(null);
     setVideoSource(null);
     setVideoMetadata(null);
     setVideoPreviewFrames([]);
     setSelectedVideoPreviewFrame(0);
+    useVideoPlaybackStore.getState().resetPlaybackState();
+    setVideoLayerTracks([]);
     setOriginalImage(null);
     setProcessedImage(null);
     setShowOriginal(true);
@@ -155,14 +166,15 @@ export function useProjectHydrator(args: UseProjectHydratorArgs): UseProjectHydr
     applyEffectParams(DEFAULT_FRAME_SETTINGS);
     setWorkspaceMode("image");
     setStatus("New project created");
-    markProjectDirty();
   }, [
+    clearVideoMediaState,
     newProject,
     setSourceImageFile,
     setVideoSource,
     setVideoMetadata,
     setVideoPreviewFrames,
     setSelectedVideoPreviewFrame,
+    setVideoLayerTracks,
     setOriginalImage,
     setProcessedImage,
     setShowOriginal,
@@ -173,11 +185,11 @@ export function useProjectHydrator(args: UseProjectHydratorArgs): UseProjectHydr
     setWorkspaceMode,
     setStatus,
     applyEffectParams,
-    markProjectDirty,
   ]);
 
   const handleSaveProject = useCallback(async (): Promise<boolean> => {
     try {
+      const currentVideoLayerTracks = cloneLayerTracks(useVideoPlaybackStore.getState().layerTracks);
       const committedLayers = layersRef.current.map((layer) => ({
         ...layer,
         settings: { ...layer.settings },
@@ -208,6 +220,12 @@ export function useProjectHydrator(args: UseProjectHydratorArgs): UseProjectHydr
         newProject(name);
       }
 
+      updateManifest((manifest) => ({
+        ...manifest,
+        videoLayerTracks: cloneLayerTracks(currentVideoLayerTracks),
+        videoAssetPath: videoSource ? getNativeFilePath(videoSource) : null,
+      }));
+
       if (originalImage) {
         await persistSourceImageForProject(
           originalImage,
@@ -220,9 +238,10 @@ export function useProjectHydrator(args: UseProjectHydratorArgs): UseProjectHydr
       }
 
       const existingPath = useProjectStore.getState().filePath;
+      const manifestName = useProjectStore.getState().manifest?.name ?? projectManifest?.name;
       const path = existingPath ?? await pickSaveProjectPath(
-        projectManifest?.name
-          ? `${projectManifest.name}.dyproj`
+        manifestName
+          ? `${manifestName}.dyproj`
           : `${sourceImageFile?.name.replace(/\.[^.]+$/, "") ?? "project"}.dyproj`,
       );
       if (!path) {
@@ -270,8 +289,39 @@ export function useProjectHydrator(args: UseProjectHydratorArgs): UseProjectHydr
         toast.warning(`${result.offlineAssets.length} asset(s) could not be relinked`);
       }
       clearProjectDirty();
+      await clearVideoMediaState?.();
+      useVideoPlaybackStore.getState().resetPlaybackState();
+      setVideoSource(null);
+      setVideoMetadata(null);
+      setVideoPreviewFrames([]);
+      setSelectedVideoPreviewFrame(0);
+      setOriginalImage(null);
+      setProcessedImage(null);
+      setShowOriginal(true);
 
       const loadedManifest = useProjectStore.getState().manifest;
+      setVideoLayerTracks(cloneLayerTracks(loadedManifest?.videoLayerTracks ?? []));
+      
+      // Restore video if saved
+      let videoWasRestored = false;
+      if (loadedManifest?.videoAssetPath) {
+        try {
+          const videoBytes = await readBytesFromPath(loadedManifest.videoAssetPath);
+          if (videoBytes && loadVideoFile) {
+            const videoFile = new File([videoBytes], loadedManifest.videoAssetPath.split("/").pop() || "video.mp4", {
+              type: "video/mp4",
+            });
+            // Attach the native path so getNativeFilePath can find it
+            Object.assign(videoFile, { path: loadedManifest.videoAssetPath });
+            await loadVideoFile(videoFile);
+            videoWasRestored = true;
+          }
+        } catch (err) {
+          console.warn("Failed to restore video from saved path", err);
+          toast.warning("Video could not be restored (file may have moved)");
+        }
+      }
+      
       const imageAsset = loadedManifest?.assets.find((a) => a.assetType === "image" && !a.offline)
         ?? loadedManifest?.assets.find((a) => !a.offline && /\.(png|jpe?g|gif|webp|bmp)$/i.test(a.name));
 
@@ -309,13 +359,13 @@ export function useProjectHydrator(args: UseProjectHydratorArgs): UseProjectHydr
         applyLayerSnapshotToControls,
       );
 
-      if (!didHydrateFilmstrip && !didHydrateRootLayers) {
+      if (!didHydrateFilmstrip && !didHydrateRootLayers && !videoWasRestored) {
         // Ensure deterministic baseline for image-only projects:
         // one default layer, active ID set, controls synced from the layer snapshot.
         resetToDefaultSingleLayer();
       }
 
-      if (imageAsset?.originalPath) {
+      if (imageAsset?.originalPath && !videoWasRestored) {
         try {
           const bytes = await readBytesFromPath(imageAsset.originalPath);
           if (bytes) {
@@ -337,7 +387,7 @@ export function useProjectHydrator(args: UseProjectHydratorArgs): UseProjectHydr
           }
         }
       } else {
-        if (!didHydrateFilmstrip) {
+        if (!didHydrateFilmstrip && !videoWasRestored) {
           setStatus("Project loaded (no source image asset)");
         }
       }
@@ -348,13 +398,21 @@ export function useProjectHydrator(args: UseProjectHydratorArgs): UseProjectHydr
   }, [
     loadProjectStore,
     clearProjectDirty,
+    clearVideoMediaState,
+    loadVideoFile,
+    setVideoSource,
+    setVideoMetadata,
+    setVideoPreviewFrames,
+    setSelectedVideoPreviewFrame,
     setCustomColors,
     setCustomPalette,
     setPaletteOptions,
-    setPalette,
+    setVideoLayerTracks,
     setFrames,
     setSelectedFrameIndex,
     setSelectedFrameIds,
+    setLayers,
+    setActiveLayerId,
     resetToDefaultSingleLayer,
     applyLayerSnapshotToControls,
     setWorkspaceMode,

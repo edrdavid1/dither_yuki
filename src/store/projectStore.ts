@@ -24,6 +24,7 @@ function hashManifest(m: DyprojManifest): string {
     palettes: m.palettes,
     assets: m.assets,
     animation: m.animation,
+    videoLayerTracks: m.videoLayerTracks,
   });
 }
 
@@ -76,6 +77,7 @@ export const useProjectStore = create<ProjectSlice>()(
           palettes: [],
           assets: [],
           animation: null,
+          videoLayerTracks: [],
         };
         set({ manifest, savedHash: null, filePath: null, offlineAssets: [] });
       },

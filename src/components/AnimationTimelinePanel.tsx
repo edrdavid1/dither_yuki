@@ -124,7 +124,6 @@ export const AnimationTimelinePanel = ({
                     onMultiSelect?.(frames[i]!.id, true);
                   }
                 } else {
-                  selectedFrameIds?.clear();
                   const idx = frames.findIndex((item) => item.id === frameId);
                   if (idx >= 0) onSelectFrame(idx);
                 }

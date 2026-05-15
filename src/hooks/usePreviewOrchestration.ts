@@ -9,6 +9,7 @@ export interface UsePreviewOrchestrationArgs {
   videoPreviewBusy: boolean;
   activeLayersPayload: unknown[];
   processImage: (imageData: ImageData, layers: unknown[]) => Promise<{ buffer: ArrayBuffer; width: number; height: number }>;
+  setProcessedRgba?: Dispatch<SetStateAction<{ width: number; height: number; rgba: Uint8ClampedArray } | null>>;
   renderInspectorPreview: (
     sourceImage: HTMLImageElement,
     preferBackend: boolean,
@@ -31,6 +32,7 @@ export function usePreviewOrchestration({
   videoPreviewBusy,
   activeLayersPayload,
   processImage,
+  setProcessedRgba,
   renderInspectorPreview,
   setProcessedImage,
   setShowOriginal,
@@ -44,7 +46,9 @@ export function usePreviewOrchestration({
   const previewDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const accuratePreviewDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inFlightPreviewRef = useRef(false);
+  const imagePreviewRequestIdRef = useRef(0);
   const queuedPreviewRef = useRef<{
+    requestId: number;
     mode: "image" | "video" | "animation";
     image: HTMLImageElement;
     quality: "fast" | "accurate";
@@ -53,6 +57,7 @@ export function usePreviewOrchestration({
   const handleApplyFilter = useCallback(async (
     sourceImage: HTMLImageElement,
     quality: "fast" | "accurate" = "fast",
+    requestId = imagePreviewRequestIdRef.current,
   ) => {
     const startedAt = performance.now();
     if (!sourceImage) {
@@ -80,13 +85,34 @@ export function usePreviewOrchestration({
 
       const { buffer, width, height } = await processImage(imageData, activeLayersPayload);
 
-      const resultData = new ImageData(new Uint8ClampedArray(buffer), width, height);
+      if (requestId !== imagePreviewRequestIdRef.current) {
+        return;
+      }
+
+      const processedRgba = {
+        width,
+        height,
+        rgba: new Uint8ClampedArray(buffer),
+      };
+
+      if (setProcessedRgba) {
+        setProcessedRgba(processedRgba);
+        setShowOriginal(false);
+        onPreviewQualityChange?.(quality);
+        onPreviewLatencyMeasured?.(Math.round(performance.now() - startedAt), quality);
+        return;
+      }
+
+      const resultData = new ImageData(processedRgba.rgba, width, height);
       canvas.width = width;
       canvas.height = height;
       ctx.putImageData(resultData, 0, 0);
 
       const processedImg = new Image();
       processedImg.onload = () => {
+        if (requestId !== imagePreviewRequestIdRef.current) {
+          return;
+        }
         setProcessedImage(processedImg);
         setShowOriginal(false);
         onPreviewQualityChange?.(quality);
@@ -100,7 +126,7 @@ export function usePreviewOrchestration({
     } finally {
       setPreviewProcessing(false);
     }
-  }, [activeLayersPayload, maxPreviewPx, onPreviewLatencyMeasured, onPreviewQualityChange, processImage, setPreviewProcessing, setProcessedImage, setShowOriginal]);
+  }, [activeLayersPayload, maxPreviewPx, onPreviewLatencyMeasured, onPreviewQualityChange, processImage, setPreviewProcessing, setProcessedImage, setProcessedRgba, setShowOriginal]);
 
   const runPreviewQueue = useCallback(async () => {
     if (inFlightPreviewRef.current) return;
@@ -112,7 +138,7 @@ export function usePreviewOrchestration({
 
     try {
       if (next.mode === "image") {
-        await handleApplyFilter(next.image, next.quality);
+        await handleApplyFilter(next.image, next.quality, next.requestId);
       } else {
         await renderInspectorPreview(next.image, true, next.quality);
       }
@@ -129,7 +155,8 @@ export function usePreviewOrchestration({
     image: HTMLImageElement,
     quality: "fast" | "accurate" = "fast",
   ) => {
-    queuedPreviewRef.current = { mode, image, quality };
+    const requestId = ++imagePreviewRequestIdRef.current;
+    queuedPreviewRef.current = { requestId, mode, image, quality };
     if (previewDebounceTimerRef.current) clearTimeout(previewDebounceTimerRef.current);
     previewDebounceTimerRef.current = setTimeout(() => {
       void runPreviewQueue();
@@ -158,19 +185,12 @@ export function usePreviewOrchestration({
       if (previewDebounceTimerRef.current) clearTimeout(previewDebounceTimerRef.current);
       if (accuratePreviewDebounceRef.current) clearTimeout(accuratePreviewDebounceRef.current);
     };
-  }, [originalImage, scheduleAccuratePreview, schedulePreview, workspaceMode]);
+  }, [activeLayersPayload, originalImage, scheduleAccuratePreview, schedulePreview, workspaceMode]);
 
-  useEffect(() => {
-    if (!originalImage || workspaceMode !== "video" || videoPreviewBusy) {
-      return;
-    }
-    schedulePreview("video", originalImage, "fast");
-    scheduleAccuratePreview("video", originalImage);
-    return () => {
-      if (previewDebounceTimerRef.current) clearTimeout(previewDebounceTimerRef.current);
-      if (accuratePreviewDebounceRef.current) clearTimeout(accuratePreviewDebounceRef.current);
-    };
-  }, [activeLayersPayload, originalImage, scheduleAccuratePreview, schedulePreview, videoPreviewBusy, workspaceMode]);
+  // Video-mode preview is handled entirely by useVideoPlaybackOrchestration,
+  // which owns videoProcessedRgba and calls setShowOriginal(false) only after
+  // a frame is ready.  Running schedulePreview here would call setShowOriginal(false)
+  // before videoProcessedRgba is populated, producing a white canvas.
 
   useEffect(() => {
     if (!originalImage || workspaceMode !== "animation" || isPlaying) {

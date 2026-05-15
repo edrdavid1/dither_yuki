@@ -14,6 +14,7 @@ import {
   Image,
   Layers,
   LineChart,
+  List,
   MinusSquare,
   Palette,
   PanelLeft,
@@ -109,6 +110,7 @@ export const ICONS = {
   SAVE_GIF: makeIcon(Save),
   IMPORT_FRAME: makeIcon(FolderOpen),
   PROPERTIES: makeIcon(SlidersHorizontal),
+  RENDER_QUEUE: makeIcon(List),
 } as const;
 
 export type IconName = keyof typeof ICONS;

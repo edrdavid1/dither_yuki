@@ -27,12 +27,18 @@ import { useEditorControlSync } from "@/hooks/useEditorControlSync";
 import { useFrameLayerSync } from "@/hooks/useFrameLayerSync";
 import { useLayerSession } from "@/hooks/useLayerSession";
 import { useFilmstripSession } from "@/hooks/useFilmstripSession";
+import { useVideoMediaSession } from "@/hooks/useVideoMediaSession";
+import { useVideoPlaybackOrchestration } from "@/hooks/useVideoPlaybackOrchestration";
+import { useMasterClock } from "@/hooks/useMasterClock";
 import { usePreviewOrchestration } from "@/hooks/usePreviewOrchestration";
 import { useProjectHydrator } from "@/hooks/useProjectHydrator";
 import { useVideoJobLifecycle, type VideoJobProgressResponse } from "@/hooks/useVideoJobLifecycle";
+import { useVideoRenderQueue } from "@/hooks/useVideoRenderQueue";
 import { useLayerReadOnlyGuards } from "@/hooks/useLayerReadOnlyGuards";
 import { usePaletteWorkflow } from "@/hooks/usePaletteWorkflow";
 import { usePerformanceBudget } from "@/hooks/usePerformanceBudget";
+import { useVideoPreviewRuntime } from "@/hooks/useVideoPreviewRuntime";
+import { useVideoRenderRuntime } from "@/hooks/useVideoRenderRuntime";
 import {
   exportSvgFrame,
   importGif,
@@ -41,18 +47,17 @@ import {
   safeTauriInvoke,
 } from "@/lib/tauriBridge";
 import { useProjectStore } from "@/store/projectStore";
+import { useVideoPlaybackStore } from "@/store/videoPlaybackStore";
+import { useShallow } from "zustand/react/shallow";
 import { type FrameSettings } from "@/types/frameSettings";
 import { validateBackendPayload } from "@/lib/layerMapping";
 import {
   buildSiblingOutputPath,
   downloadBytes,
-  extractVideoFrames,
   extractSingleVideoFrame,
   getNativeFilePath,
   imageToRgbaFrame,
-  probeVideoFileMetadataLocal,
   rgbaToImage,
-  type VideoMetadataLike,
 } from "@/lib/mediaWorkflow";
 import {
   buildBackendLayersPayload,
@@ -62,6 +67,8 @@ import {
   type Layer,
 } from "@/types/layers";
 import { toast } from "sonner";
+import { isVideoGpuPreviewEnabled, isVideoGpuRenderEnabled } from "@/lib/videoRuntime/featureFlags";
+import { cloneLayerTracks, type LayerTrack } from "@/lib/videoRuntime/layerTracks";
 
 type SupportedAlgorithmName = (typeof DITHERING_ALGORITHMS)[number];
 type SupportedPaletteName = (typeof COLOR_PALETTES)[number];
@@ -153,15 +160,6 @@ interface ColorPipelineSnapshot {
   layersPayload: ReturnType<typeof buildBackendLayersPayload>;
 }
 
-
-interface VideoPreviewFrame {
-  id: string;
-  src: string;
-  width: number;
-  height: number;
-  label: string;
-}
-
 const makeFrameId = () => `frame-${Math.random().toString(36).slice(2, 10)}-${Date.now()}`;
 
 const imageToFrameSrc = (image: HTMLImageElement) => image.currentSrc || image.src || "";
@@ -193,20 +191,15 @@ const sourceToDataUrl = async (src: string): Promise<string> => {
   return blobToDataUrl(await response.blob());
 };
 
-const loadImageFromBytes = (bytes: Uint8Array) =>
-  new Promise<HTMLImageElement>((resolve, reject) => {
+const loadImageFromBytes = async (bytes: Uint8Array) => {
+  const dataUrl = await blobToDataUrl(new Blob([bytes as unknown as BlobPart]));
+  return new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new Image();
-    const objectUrl = URL.createObjectURL(new Blob([bytes as unknown as BlobPart]));
-    image.onload = () => {
-      URL.revokeObjectURL(objectUrl);
-      resolve(image);
-    };
-    image.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
-      reject(new Error("Failed to load image frame"));
-    };
-    image.src = objectUrl;
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Failed to load image frame"));
+    image.src = dataUrl;
   });
+};
 
 const loadImageFromPath = async (filePath: string) => {
   const bytes = await readBytesFromPath(filePath);
@@ -216,43 +209,20 @@ const loadImageFromPath = async (filePath: string) => {
   return loadImageFromBytes(bytes);
 };
 
-const loadImageFromSrc = (src: string) =>
-  new Promise<HTMLImageElement>((resolve, reject) => {
-    const image = new Image();
-    const finalize = (resolvedSrc: string) => {
-      image.onload = () => resolve(image);
-      image.onerror = () => reject(new Error("Failed to load image frame"));
-      image.src = resolvedSrc;
-    };
-
-    if (!src || src.startsWith("data:") || src.startsWith("blob:")) {
-      finalize(src);
-      return;
-    }
-
-    void fetch(src)
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error(`Failed to fetch image source: ${response.status} ${response.statusText}`);
-        }
-        const blob = await response.blob();
-        const objectUrl = URL.createObjectURL(blob);
-        image.onload = () => {
-          URL.revokeObjectURL(objectUrl);
-          resolve(image);
-        };
-        image.onerror = () => {
-          URL.revokeObjectURL(objectUrl);
-          reject(new Error("Failed to load image frame"));
-        };
-        image.src = objectUrl;
-      })
-      .catch((error) => {
-        // Fallback to the original source path if fetch is unavailable in this runtime.
-        console.warn("[image-load] blob fetch fallback failed, using direct src", error);
-        finalize(src);
-      });
+const loadImageFromSrc = async (src: string): Promise<HTMLImageElement> => {
+  const image = new Image();
+  const resolvedSrc = await sourceToDataUrl(src).catch((error) => {
+    // Fallback to the original source path if fetch is unavailable in this runtime.
+    console.warn("[image-load] source conversion failed, using direct src", error);
+    return src;
   });
+
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Failed to load image frame"));
+    image.src = resolvedSrc;
+  });
+};
 
 const applyCmykSoftProof = (rgba: Uint8ClampedArray): Uint8ClampedArray => {
   const out = new Uint8ClampedArray(rgba);
@@ -587,6 +557,7 @@ const Index = () => {
   const [imageSize, setImageSize] = useState<string>();
   const [originalImage, setOriginalImage] = useState<HTMLImageElement | null>(null);
   const [processedImage, setProcessedImage] = useState<HTMLImageElement | null>(null);
+  const [imageProcessedRgba, setImageProcessedRgba] = useState<{ width: number; height: number; rgba: Uint8ClampedArray } | null>(null);
   const [showOriginal, setShowOriginal] = useState(true);
   const [showColorStudio, setShowColorStudio] = useState(false);
   const [customColors, setCustomColors] = useState<string[]>(["#000000", "#FFFFFF"]);
@@ -634,11 +605,35 @@ const Index = () => {
   const [algorithmOptions, setAlgorithmOptions] = useState<DitheringAlgorithm[]>(DITHERING_ALGORITHMS);
   const [paletteOptions, setPaletteOptions] = useState<ColorPalette[]>(COLOR_PALETTES);
   const [sourceImageFile, setSourceImageFile] = useState<File | null>(null);
-  const [videoSource, setVideoSource] = useState<File | null>(null);
-  const [videoMetadata, setVideoMetadata] = useState<VideoMetadataLike | null>(null);
-  const [videoPreviewFrames, setVideoPreviewFrames] = useState<VideoPreviewFrame[]>([]);
-  const [selectedVideoPreviewFrame, setSelectedVideoPreviewFrame] = useState(0);
-  const [videoPreviewBusy, setVideoPreviewBusy] = useState(false);
+  const {
+    videoPlayheadFrameIndex,
+    setVideoPlayheadFrameIndex,
+    videoPlaying,
+    setVideoPlaying,
+    videoLoopEnabled,
+    setVideoLoopEnabled,
+    videoInFrame,
+    setVideoInFrame,
+    videoOutFrame,
+    setVideoOutFrame,
+    videoLayerTracks,
+    setVideoLayerTracks,
+  } = useVideoPlaybackStore(
+    useShallow((state) => ({
+      videoPlayheadFrameIndex: state.playheadFrameIndex,
+      setVideoPlayheadFrameIndex: state.setPlayheadFrameIndex,
+      videoPlaying: state.playing,
+      setVideoPlaying: state.setPlaying,
+      videoLoopEnabled: state.loopEnabled,
+      setVideoLoopEnabled: state.setLoopEnabled,
+      videoInFrame: state.inFrame,
+      setVideoInFrame: state.setInFrame,
+      videoOutFrame: state.outFrame,
+      setVideoOutFrame: state.setOutFrame,
+      videoLayerTracks: state.layerTracks,
+      setVideoLayerTracks: state.setLayerTracks,
+    })),
+  );
   const [videoDeps, setVideoDeps] = useState<DependencyStatusResponse | null>(null);
   const [shareablePatternAlgorithms, setShareablePatternAlgorithms] = useState<string[]>([]);
   // ── Unified filmstrip state ────────────────────────────────────────────────
@@ -665,6 +660,9 @@ const Index = () => {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [showExitWarning, setShowExitWarning] = useState(false);
   const [isSavingExitWarning, setIsSavingExitWarning] = useState(false);
+  const hasUnsavedChangesRef = useRef(hasUnsavedChanges);
+  hasUnsavedChangesRef.current = hasUnsavedChanges;
+  const lastSyncedDirtyRef = useRef<boolean | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
@@ -679,8 +677,57 @@ const Index = () => {
   activeLayerIdRef.current = activeLayerId;
   const { processImage } = useImageWorker();
   const markProjectDirty = useCallback(() => {
-    setHasUnsavedChanges(true);
+    setHasUnsavedChanges((prev) => (prev ? prev : true));
   }, []);
+  const clearProjectDirty = useCallback(() => {
+    setHasUnsavedChanges((prev) => (prev ? false : prev));
+  }, []);
+
+  const commitVideoLayerTracks = useCallback((nextTracks: LayerTrack[]) => {
+    const cloned = cloneLayerTracks(nextTracks);
+    setVideoLayerTracks(cloned);
+
+    const state = useProjectStore.getState();
+    if (state.manifest) {
+      state.updateManifest((manifest) => ({
+        ...manifest,
+        videoLayerTracks: cloneLayerTracks(cloned),
+      }));
+    }
+
+    markProjectDirty();
+  }, [markProjectDirty, setVideoLayerTracks]);
+
+  const {
+    videoSource,
+    setVideoSource,
+    videoMetadata,
+    setVideoMetadata,
+    videoPreviewFrames,
+    setVideoPreviewFrames,
+    selectedVideoPreviewFrame,
+    setSelectedVideoPreviewFrame,
+    videoPreviewBusy,
+    videoOriginalRgba,
+    videoProcessedRgba,
+    setVideoOriginalRgba,
+    setVideoProcessedRgba,
+    videoProcessingMs,
+    setVideoProcessingMs,
+    loadVideoFile,
+    clearVideoMediaState,
+  } = useVideoMediaSession({
+    setOriginalImage,
+    setProcessedImage,
+    setImageProcessedRgba,
+    setShowOriginal,
+    setImageSize,
+    setStatus,
+    setWorkflowStatus,
+    setWorkspaceMode,
+    setSourceImageFile,
+    commitVideoLayerTracks,
+  });
 
   // Maximum dimension (px) used for live preview. High-res images are downscaled
   // to this limit before being sent to the backend, reducing IPC payload by up to
@@ -867,6 +914,18 @@ const Index = () => {
   const { measureBudget } = usePerformanceBudget({
     setStatus,
   });
+  const videoGpuPreviewEnabled = isVideoGpuPreviewEnabled();
+  const videoGpuRenderEnabled = isVideoGpuRenderEnabled();
+  useVideoPreviewRuntime({
+    enabled: workspaceMode === "video" && Boolean(videoSource),
+  });
+  const videoRenderRuntime = useVideoRenderRuntime({
+    enabled: videoGpuRenderEnabled,
+  });
+  const videoRenderQueue = useVideoRenderQueue({
+    enabled: videoGpuRenderEnabled,
+    pollIntervalMs: 2000,
+  });
 
   const jobProgressText = jobProgress
     ? `${jobProgress.status} ${jobProgress.current_frame}/${jobProgress.total_frames}`
@@ -997,102 +1056,6 @@ const Index = () => {
     void checkDependencies();
   }, []);
 
-  const handleVideoFile = (file: File) => {
-    setVideoSource(file);
-    setVideoPreviewFrames([]);
-    setSelectedVideoPreviewFrame(0);
-    setOriginalImage(null);
-    setProcessedImage(null);
-    setShowOriginal(true);
-    setWorkflowStatus(`Video selected: ${file.name}`);
-    setStatus(`Video loading preview…`);
-
-    const nativePath = getNativeFilePath(file);
-    const probe = async () => {
-      if (nativePath) {
-        const backendMetadata = await safeTauriInvoke<VideoMetadataLike>("probe_video_file_metadata", {
-          inputPath: nativePath,
-        });
-        if (backendMetadata) {
-          setVideoMetadata(backendMetadata);
-          return;
-        }
-      }
-      const fallbackMetadata = await probeVideoFileMetadataLocal(file);
-      setVideoMetadata(fallbackMetadata);
-    };
-    void probe().catch((error) => {
-      console.error("Failed to probe video metadata", error);
-      setVideoMetadata(null);
-    });
-
-    const buildPreview = async () => {
-      setVideoPreviewBusy(true);
-      try {
-        // Extract all preview frames in parallel (one <video> per timestamp)
-        // Frame 0 at t=0 is nearly instant; the rest are decoded concurrently.
-        const totalPreviewFrames = 5;
-        const extracted = await extractVideoFrames(file, {
-          maxFrames: totalPreviewFrames,
-          maxDimension: VIDEO_PREVIEW_MAX_DIMENSION,
-        });
-
-        // Show frame 0 immediately while the rest are being converted
-        if (extracted.frames[0]) {
-          const firstImage = await rgbaToImage(extracted.frames[0], extracted.width, extracted.height);
-          setVideoPreviewFrames([{
-            id: "video-preview-0",
-            src: firstImage.src,
-            width: extracted.width,
-            height: extracted.height,
-            label: "0.0s",
-          }]);
-          setSelectedVideoPreviewFrame(0);
-          setOriginalImage(firstImage);
-          setProcessedImage(null);
-          setShowOriginal(true);
-          setImageSize(`${firstImage.width}×${firstImage.height}`);
-          setStatus(`Video preview loading…`);
-        }
-
-        // Convert all frames (rgbaToImage is fast since JPEG encode)
-        const converted = await Promise.all(
-          extracted.frames.map(async (rgba, index) => {
-            const image = await rgbaToImage(rgba, extracted.width, extracted.height);
-            const seconds =
-              extracted.sampledFrames <= 1
-                ? 0
-                : (index / Math.max(extracted.sampledFrames - 1, 1)) * extracted.durationSeconds;
-            return {
-              id: `video-preview-${index}`,
-              src: image.src,
-              width: extracted.width,
-              height: extracted.height,
-              label: `${seconds.toFixed(1)}s`,
-            } satisfies VideoPreviewFrame;
-          }),
-        );
-
-        setVideoPreviewFrames(converted);
-        setSelectedVideoPreviewFrame(0);
-        const firstFrame = converted[0];
-        if (firstFrame) {
-          const image = await loadImageFromSrc(firstFrame.src);
-          setOriginalImage(image);
-          setImageSize(`${image.width}×${image.height}`);
-        }
-        setStatus(`Video ready — ${converted.length} preview frames`);
-      } catch (error) {
-        console.error("Failed to extract video preview frames", error);
-        toast.error("Failed to generate video preview timeline");
-        setStatus("Video preview unavailable");
-      } finally {
-        setVideoPreviewBusy(false);
-      }
-    };
-    void buildPreview();
-  };
-
   const handleGifFile = useCallback(async (file: File) => {
     setStatus("GIF loading...");
     try {
@@ -1116,11 +1079,8 @@ const Index = () => {
         isKeyframe: true,
       }));
 
+      await clearVideoMediaState();
       setWorkspaceMode("animation");
-      setVideoSource(null);
-      setVideoMetadata(null);
-      setVideoPreviewFrames([]);
-      setSelectedVideoPreviewFrame(0);
       setFrames(importedFrames);
       setSelectedFrameIndex(0);
       setSelectedFrameIds(new Set(importedFrames[0] ? [importedFrames[0].id] : []));
@@ -1131,6 +1091,7 @@ const Index = () => {
         const firstImage = await loadImageFromSrc(firstFrame.src);
         setOriginalImage(firstImage);
         setProcessedImage(null);
+        setImageProcessedRgba(null);
         setShowOriginal(true);
         setImageSize(`${firstImage.width}×${firstImage.height}`);
       }
@@ -1143,12 +1104,11 @@ const Index = () => {
       toast.error("Failed to import GIF");
       setStatus("GIF import failed");
     }
-  }, [markProjectDirty, setFrames, setSelectedFrameIds, setWorkspaceMode]);
+  }, [clearVideoMediaState, markProjectDirty, setFrames, setSelectedFrameIds, setWorkspaceMode]);
 
   const handleFile = useCallback((file: File) => {
     if (file.type.startsWith("video/")) {
-      setWorkspaceMode("video");
-      handleVideoFile(file);
+      void loadVideoFile(file);
       return;
     }
     if (file.type === "image/gif" || file.name.toLowerCase().endsWith(".gif")) {
@@ -1166,6 +1126,7 @@ const Index = () => {
         setSourceImageFile(file);
         setOriginalImage(img);
         setProcessedImage(null);
+        setImageProcessedRgba(null);
         // Clear frames so the animation auto-populate effect creates a fresh
         // first frame with the CURRENT settings (not DEFAULT_FRAME_SETTINGS).
         setFrames([]);
@@ -1189,6 +1150,13 @@ const Index = () => {
       const file = event.dataTransfer?.files?.[0];
       if (!file) return;
       event.preventDefault();
+      // If it's a video without a native path, Tauri's drag-drop listener below
+      // will handle it with the correct native path. Skip here to avoid a
+      // double-call with an incomplete File (no .path).
+      const isVideo = file.type.startsWith("video/");
+      const hasNativePath = typeof (file as File & { path?: string }).path === "string" &&
+        (file as File & { path?: string }).path!.length > 0;
+      if (isVideo && !hasNativePath) return;
       handleFile(file);
     };
 
@@ -1201,6 +1169,40 @@ const Index = () => {
     };
   }, [handleFile]);
 
+  // Listen to Tauri's native drag-drop event which provides full native paths.
+  // This handles video files dragged from Finder (browser DnD does not expose .path).
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    const VIDEO_EXTS = new Set(["mp4", "mov", "avi", "mkv", "webm", "m4v", "flv", "wmv", "ts", "mts"]);
+
+    const setup = async () => {
+      try {
+        const { listen } = await import("@tauri-apps/api/event");
+        unlisten = await listen<{ paths: string[] }>("tauri://drag-drop", (event) => {
+          const filePath = event.payload.paths?.[0];
+          if (!filePath) return;
+          const fileName = filePath.split(/[\\/]/).pop() ?? filePath;
+          const ext = fileName.split(".").pop()?.toLowerCase() ?? "";
+          if (!VIDEO_EXTS.has(ext)) return; // non-video drops handled by browser handler
+          // Create a File with the native path attached so loadVideoFile can open the Rust stream.
+          const fileWithPath = Object.assign(new File([], fileName), { path: filePath });
+          handleFile(fileWithPath);
+        });
+      } catch {
+        // Not running inside Tauri — browser DnD fallback is sufficient.
+      }
+    };
+    void setup();
+    return () => {
+      if (!unlisten) return;
+      try {
+        unlisten();
+      } catch (err) {
+        console.warn("[Index] drag-drop unlisten failed", err);
+      }
+    };
+  }, [handleFile]);
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1210,7 +1212,7 @@ const Index = () => {
   const handleVideoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    handleVideoFile(file);
+    void loadVideoFile(file);
   };
 
   // Control sync hook - handles editor parameter state and undo/redo
@@ -1287,7 +1289,7 @@ const Index = () => {
     const payload = buildBackendLayersPayload(mergedLayers, customPaletteRgb);
 
     // Guardrail: validate payload before it reaches backend
-    if (process.env.NODE_ENV === "development") {
+    if (import.meta.env.DEV) {
       const invalidItems = payload
         .map((item, idx) => ({ valid: validateBackendPayload(item), idx, item }))
         .filter((r) => r.valid === null);
@@ -1314,7 +1316,7 @@ const Index = () => {
     const paletteSnapshot = customPaletteRgb.map((rgb) => [rgb[0], rgb[1], rgb[2]] as [number, number, number]);
     const layersPayload = buildBackendLayersPayload(mergedLayers, paletteSnapshot);
 
-    if (process.env.NODE_ENV === "development") {
+    if (import.meta.env.DEV) {
       const invalidItems = layersPayload
         .map((item, idx) => ({ valid: validateBackendPayload(item), idx, item }))
         .filter((r) => r.valid === null);
@@ -1405,6 +1407,7 @@ const Index = () => {
 
       if (forceProcessedImage || framesRef.current[selectedFrameIndex]?.id === frameId) {
         setProcessedImage(previewImage);
+        setShowOriginal(false);
       }
 
       return previewDataUrl;
@@ -1412,7 +1415,7 @@ const Index = () => {
       console.error("Failed to render frame preview", error);
       return null;
     }
-  }, [cmykSoftProof, customPaletteRgb, getOrCreatePreviewRgbaFrame, processImage, selectedFrameIndex]);
+  }, [cmykSoftProof, customPaletteRgb, getOrCreatePreviewRgbaFrame, processImage, selectedFrameIndex, setProcessedImage, setShowOriginal]);
 
   // Frame-layer synchronization - canonical source for layer persistence
   const { persistCurrentLayersToFrame, syncLayersFromFrame } = useFrameLayerSync({
@@ -1576,6 +1579,7 @@ const Index = () => {
 
       if (requestId !== previewRequestIdRef.current) return;
       setProcessedImage(previewImage);
+      setShowOriginal(false);
       setPreviewQuality(quality);
       setStatus("Ready");
     } catch (error) {
@@ -1585,7 +1589,67 @@ const Index = () => {
     } finally {
       setPreviewProcessing(false);
     }
-  }, [captureColorPipelineSnapshot, cmykSoftProof, getOrCreatePreviewRgbaFrame, processImage]);
+  }, [captureColorPipelineSnapshot, cmykSoftProof, getOrCreatePreviewRgbaFrame, processImage, setProcessedImage, setPreviewQuality, setShowOriginal, setStatus]);
+
+  const masterClock = useMasterClock();
+
+  const {
+    estimatedVideoFps,
+    estimatedVideoTotalFrames,
+    effectiveVideoInFrame,
+    effectiveVideoOutFrame,
+  } = useVideoPlaybackOrchestration({
+    enabled: workspaceMode === "video",
+    workspaceMode,
+    videoSource,
+    videoMetadata,
+    videoPreviewFrameCount: videoPreviewFrames.length,
+    videoPreviewBusy,
+    videoPlaying,
+    setVideoPlaying,
+    videoLoopEnabled,
+    videoInFrame,
+    videoOutFrame,
+    videoPlayheadFrameIndex,
+    setVideoPlayheadFrameIndex,
+    videoLayerTracks,
+    captureColorPipelineSnapshot,
+    setVideoProcessedRgba,
+    setVideoProcessingMs,
+    setPreviewQuality,
+    setShowOriginal,
+    // Use the Rust MasterClockService only when Tauri events are confirmed
+    // available.  When unavailable (browser / cold start) the JS setInterval
+    // in useVideoPlaybackOrchestration acts as the fallback timing source.
+    masterClockEnabled: masterClock.tauriAvailable,
+    masterClockAwaitingFirstTick: masterClock.awaitingFirstTick,
+  });
+
+  // Master-clock-aware play/pause toggle for the video transport.
+  // When playing, the Rust MasterClockService drives the playhead via
+  // `clock_tick` events; when pausing, the JS interval in
+  // useVideoPlaybackOrchestration is the fallback timing source.
+  const handleToggleVideoPlayback = useCallback(() => {
+    if (videoPlaying) {
+      masterClock.pause();
+    } else {
+      setShowOriginal(false);
+      masterClock.play(
+        Math.max(1, estimatedVideoFps),
+        effectiveVideoInFrame,
+        effectiveVideoOutFrame,
+        estimatedVideoTotalFrames,
+      );
+    }
+  }, [
+    effectiveVideoInFrame,
+    effectiveVideoOutFrame,
+    estimatedVideoFps,
+    estimatedVideoTotalFrames,
+    masterClock,
+    setShowOriginal,
+    videoPlaying,
+  ]);
 
   usePreviewOrchestration({
     originalImage,
@@ -1594,6 +1658,7 @@ const Index = () => {
     videoPreviewBusy,
     activeLayersPayload,
     processImage,
+    setProcessedRgba: setImageProcessedRgba,
     renderInspectorPreview,
     setProcessedImage,
     setShowOriginal,
@@ -1756,6 +1821,31 @@ const Index = () => {
     setJobKind("video");
     setStatus("Submitting video workflow...");
     const colorSnapshot = captureColorPipelineSnapshot();
+    const nativePath = getNativeFilePath(videoSource);
+    const sourceExtension = videoSource.name.split(".").pop() || "mp4";
+    const defaultOutputPath = await safeTauriInvoke<string>("get_default_output_path", {
+      fileName: `dither-yuki-video-v2-${Date.now()}.mp4`, // V2 currently targets mp4 mostly
+    });
+
+    if (videoRenderRuntime.enabled && nativePath && defaultOutputPath) {
+      const v2Job = await videoRenderRuntime.startRenderJob({
+        videoId: videoSource.name,
+        startFrame: videoInFrame ?? 0,
+        endFrame: videoOutFrame ?? Math.max(0, estimatedVideoTotalFrames - 1),
+        fps: estimatedVideoFps,
+        outputFormat: "mp4",
+        inputPath: nativePath,
+        outputPath: defaultOutputPath,
+        layers: colorSnapshot.layersPayload,
+        tracks: videoLayerTracks,
+        keepAudio: true,
+      });
+      if (v2Job?.job_id) {
+        setWorkflowStatus(`Video v2 pipeline queued (${v2Job.job_id.slice(0, 8)})`);
+        setWorkflowBusy(false);
+        return;
+      }
+    }
 
     try {
       const nativePath = getNativeFilePath(videoSource);
@@ -1806,7 +1896,7 @@ const Index = () => {
       setWorkflowBusy(false);
       toast.error("Failed to run video workflow");
     }
-  }, [captureColorPipelineSnapshot, videoSource, workspaceMode]);
+  }, [animationPreviewFps, captureColorPipelineSnapshot, videoPreviewFrames.length, videoRenderRuntime, videoSource, workspaceMode]);
 
   const { handleCancelActiveJob } = useVideoJobLifecycle({
     jobId,
@@ -1840,17 +1930,20 @@ const Index = () => {
       return;
     }
 
-    void loadImageFromSrc(frame.src)
-      .then((image) => {
-        setOriginalImage(image);
-        setProcessedImage(null);
-        setShowOriginal(true);
-        setImageSize(`${image.width}×${image.height}`);
-      })
-      .catch((error) => {
-        console.error("Failed to load selected video preview frame", error);
-      });
-  }, [selectedVideoPreviewFrame, videoPreviewFrames, workspaceMode]);
+    // Clicking a sample should move the playhead near that timestamp.
+    if (videoMetadata?.duration_seconds && videoMetadata.duration_seconds > 0) {
+      const secondsLabel = frame.label.endsWith("s") ? frame.label.slice(0, -1) : frame.label;
+      const approxSeconds = Number(secondsLabel);
+      if (Number.isFinite(approxSeconds)) {
+        const nextFrame = Math.max(0, Math.min(
+          estimatedVideoTotalFrames - 1,
+          Math.round((approxSeconds / videoMetadata.duration_seconds) * (estimatedVideoTotalFrames - 1)),
+        ));
+        setVideoPlayheadFrameIndex(nextFrame);
+        masterClock.seek(nextFrame);
+      }
+    }
+  }, [selectedVideoPreviewFrame, videoMetadata?.duration_seconds, estimatedVideoTotalFrames, videoPreviewFrames, workspaceMode]);
 
   // ── Auto-populate filmstrip when image is loaded in animation mode ───────
   useEffect(() => {
@@ -1892,26 +1985,35 @@ const Index = () => {
     const frame = framesRef.current[frameIndex];
     if (!frame) return;
 
-    void loadImageFromSrc(frame.src)
-      .then((image) => {
+    let cancelled = false;
+
+    void (async () => {
+      if (isPlaying) {
+        setShowOriginal(false);
+
+        if (frame.previewDataUrl) {
+          try {
+            const preview = await loadImageFromSrc(frame.previewDataUrl);
+            if (cancelled) return;
+            setProcessedImage(preview);
+            return;
+          } catch (error) {
+            if (cancelled) return;
+            console.error("Failed to load cached frame preview", error);
+          }
+        }
+
+        if (!cancelled) {
+          void renderFramePreview(frame.id, frame.layers, undefined, true);
+        }
+        return;
+      }
+
+      try {
+        const image = await loadImageFromSrc(frame.src);
+        if (cancelled) return;
         setOriginalImage(image);
         setImageSize(`${image.width}×${image.height}`);
-
-        if (isPlaying) {
-          if (frame.previewDataUrl) {
-            void loadImageFromSrc(frame.previewDataUrl)
-              .then((preview) => {
-                setProcessedImage(preview);
-              })
-              .catch((error) => {
-                console.error("Failed to load cached frame preview", error);
-                void renderFramePreview(frame.id, frame.layers, image, true);
-              });
-          } else {
-            void renderFramePreview(frame.id, frame.layers, image, true);
-          }
-          return;
-        }
 
         setLayers(cloneLayers(frame.layers));
         setActiveLayerId(frame.activeLayerId ?? frame.layers[0]?.id ?? "");
@@ -1919,22 +2021,29 @@ const Index = () => {
         applyLayerSnapshotToControls(snapshotLayer);
 
         if (frame.previewDataUrl) {
-          void loadImageFromSrc(frame.previewDataUrl)
-            .then((preview) => {
-              setProcessedImage(preview);
-            })
-            .catch((error) => {
-              console.error("Failed to load cached frame preview", error);
-              void renderFramePreview(frame.id, frame.layers, image);
-            });
-        } else {
-          void renderFramePreview(frame.id, frame.layers, image);
+          try {
+            const preview = await loadImageFromSrc(frame.previewDataUrl);
+            if (cancelled) return;
+            setProcessedImage(preview);
+            setShowOriginal(false);
+            return;
+          } catch (error) {
+            if (cancelled) return;
+            console.error("Failed to load cached frame preview", error);
+          }
         }
-      })
-      .catch((error) => {
+
+        void renderFramePreview(frame.id, frame.layers, image);
+      } catch (error) {
+        if (cancelled) return;
         console.error("Failed to load selected animation frame", error);
-      });
-  }, [applyLayerSnapshotToControls, isPlaying, playbackFrameIndex, renderFramePreview, selectedFrameIndex, workspaceMode]);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [applyLayerSnapshotToControls, isPlaying, playbackFrameIndex, renderFramePreview, selectedFrameIndex, setActiveLayerId, setImageSize, setLayers, setOriginalImage, setProcessedImage, setShowOriginal, workspaceMode]);
 
   // ── Unified play loop — cycles selectedFrameIndex at animationPreviewFps ──
   useEffect(() => {
@@ -1951,6 +2060,7 @@ const Index = () => {
 
   const handleReset = useCallback(() => {
     setProcessedImage(null);
+    setImageProcessedRgba(null);
     setShowOriginal(true);
     setIntensity(100);
     setContrast(100);
@@ -2031,6 +2141,9 @@ const Index = () => {
     setVideoMetadata,
     setVideoPreviewFrames,
     setSelectedVideoPreviewFrame,
+    setVideoLayerTracks,
+    clearVideoMediaState,
+    loadVideoFile,
     setFrames,
     setSelectedFrameIndex,
     setSelectedFrameIds,
@@ -2043,8 +2156,8 @@ const Index = () => {
     setPalette,
     applyLayerSnapshotToControls,
     applyEffectParams,
-    markProjectDirty: () => setHasUnsavedChanges(true),
-    clearProjectDirty: () => setHasUnsavedChanges(false),
+    markProjectDirty,
+    clearProjectDirty,
     setCustomPalette,
   });
 
@@ -2053,16 +2166,49 @@ const Index = () => {
       return;
     }
 
-    console.log("[exit-debug] syncing dirty state to Rust:", hasUnsavedChanges);
-    void safeTauriInvoke("set_project_dirty", { dirty: hasUnsavedChanges });
+    // TEMP: disable project dirty sync noise while debugging black preview.
+    // Re-enable after worker rendering diagnostics are complete.
+    return;
+
+    if (videoPlaying) {
+      // Avoid hammering Rust dirty-sync while transport playback is active.
+      return;
+    }
+
+    // Sync dirty flag to Rust only when the value actually changes.
+    if (lastSyncedDirtyRef.current === hasUnsavedChanges) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      // Re-check at fire time to avoid stale syncs.
+      if (lastSyncedDirtyRef.current === hasUnsavedChanges) {
+        return;
+      }
+      lastSyncedDirtyRef.current = hasUnsavedChanges;
+      console.log("[exit-debug] syncing dirty state to Rust:", hasUnsavedChanges);
+      void safeTauriInvoke("set_project_dirty", { dirty: hasUnsavedChanges });
+    }, 1000);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [backendConnected, hasUnsavedChanges, videoPlaying]);
+
+  useEffect(() => {
+    if (!backendConnected) {
+      return;
+    }
 
     let unlisten: (() => void) | undefined;
+    let cancelled = false;
 
     const setupExitListener = async () => {
       const { listen } = await import("@tauri-apps/api/event");
-      unlisten = await listen("app-exit-requested", async () => {
-        console.log("[exit-debug] app-exit-requested received; dirty=", hasUnsavedChanges);
-        if (!hasUnsavedChanges) {
+      const stop = await listen("app-exit-requested", async () => {
+        const isDirty = hasUnsavedChangesRef.current;
+        console.log("[exit-debug] app-exit-requested received; dirty=", isDirty);
+        if (!isDirty) {
           console.log("[exit-debug] no unsaved changes; exiting immediately");
           await safeTauriInvoke("exit_app", {});
           return;
@@ -2071,14 +2217,31 @@ const Index = () => {
         console.log("[exit-debug] unsaved changes present; showing warning dialog");
         setShowExitWarning(true);
       });
+
+      if (cancelled) {
+        try {
+          stop();
+        } catch (err) {
+          console.warn("[Index] exit listener teardown failed during setup cancellation", err);
+        }
+        return;
+      }
+
+      unlisten = stop;
     };
 
     void setupExitListener();
 
     return () => {
-      void unlisten?.();
+      cancelled = true;
+      if (!unlisten) return;
+      try {
+        unlisten();
+      } catch (err) {
+        console.warn("[Index] exit listener unlisten failed", err);
+      }
     };
-  }, [backendConnected, hasUnsavedChanges, handleSaveProject]);
+  }, [backendConnected]);
 
   const handleSaveAndExit = useCallback(async () => {
     setIsSavingExitWarning(true);
@@ -2093,7 +2256,7 @@ const Index = () => {
     } finally {
       setIsSavingExitWarning(false);
     }
-  }, [handleSaveProject, hasUnsavedChanges]);
+  }, [handleSaveProject]);
 
   const handleDiscardAndExit = useCallback(async () => {
     setShowExitWarning(false);
@@ -2128,7 +2291,7 @@ const Index = () => {
     processedImage,
     setStatus,
     setQuantizingPalette,
-    setPalette,
+    setPalette: (v: string) => setPalette(v as ColorPalette),
     setPaletteOptions,
     setCustomColors,
     setHasUnsavedChanges,
@@ -2438,7 +2601,7 @@ const Index = () => {
       const stop = await listen<string>("menu-action", ({ payload }) => {
         switch (payload) {
           case "quit":
-            if (!hasUnsavedChanges) {
+            if (!hasUnsavedChangesRef.current) {
               void safeTauriInvoke("exit_app", {});
               break;
             }
@@ -2492,7 +2655,11 @@ const Index = () => {
       });
 
       if (cancelled) {
-        await stop();
+        try {
+          stop();
+        } catch (err) {
+          console.warn("[Index] menu listener teardown failed during setup cancellation", err);
+        }
         return;
       }
 
@@ -2503,7 +2670,12 @@ const Index = () => {
 
     return () => {
       cancelled = true;
-      void unlisten?.();
+      if (!unlisten) return;
+      try {
+        unlisten();
+      } catch (err) {
+        console.warn("[Index] menu listener unlisten failed", err);
+      }
     };
   }, [
     backendConnected,
@@ -2519,7 +2691,6 @@ const Index = () => {
     handleReset,
     handleSaveProject,
     handleUndo,
-    hasUnsavedChanges,
   ]);
 
   // Frames that are keyframes — shown with a blue dot in the filmstrip.
@@ -2610,6 +2781,15 @@ const Index = () => {
               workspaceMode={viewState.workspaceMode}
               originalImage={originalImage}
               processedImage={processedImage}
+              originalRgba={viewState.workspaceMode === "video" ? videoOriginalRgba : null}
+              processedRgba={
+                viewState.workspaceMode === "video"
+                  ? videoProcessedRgba
+                  : viewState.workspaceMode === "image"
+                    ? imageProcessedRgba
+                    : null
+              }
+              processingMs={viewState.workspaceMode === "video" ? videoProcessingMs : null}
               showOriginal={showOriginal}
               setShowOriginal={setShowOriginal}
               frames={frames}
@@ -2630,9 +2810,49 @@ const Index = () => {
               onDeleteSelectedFrame={handleDeleteSelectedFrame}
               onApplyToSelected={handleApplyToSelected}
               onRenderAnimation={handleExportAnimation}
+              layers={layers}
+              activeLayerId={activeLayerId}
+              videoLayerTracks={videoLayerTracks}
+              onUpdateVideoLayerTrack={(track) => {
+                const next = videoLayerTracks.filter((t) => t.layerId !== track.layerId);
+                next.push(track);
+                commitVideoLayerTracks(next);
+              }}
+              onSelectVideoTrackLayer={setActiveLayerId}
               videoPreviewFrames={videoPreviewFrames}
               selectedVideoPreviewFrame={selectedVideoPreviewFrame}
               setSelectedVideoPreviewFrame={setSelectedVideoPreviewFrame}
+              videoPlayheadFrameIndex={videoPlayheadFrameIndex}
+              setVideoPlayheadFrameIndex={(frame) => {
+                setVideoPlayheadFrameIndex(frame);
+                masterClock.seek(frame);
+              }}
+              videoTotalFrames={estimatedVideoTotalFrames}
+              videoFps={estimatedVideoFps}
+              videoPlaying={videoPlaying}
+              onToggleVideoPlayback={handleToggleVideoPlayback}
+              videoLoopEnabled={videoLoopEnabled}
+              setVideoLoopEnabled={setVideoLoopEnabled}
+              videoInFrame={effectiveVideoInFrame}
+              setVideoInFrame={(v) => setVideoInFrame(v)}
+              videoOutFrame={effectiveVideoOutFrame}
+              setVideoOutFrame={(v) => setVideoOutFrame(v)}
+              onTrackActiveLayerForVideo={() => {
+                const layerId = activeLayerIdRef.current;
+                if (!layerId) return;
+                const startFrame = effectiveVideoInFrame;
+                const endFrame = effectiveVideoOutFrame;
+                commitVideoLayerTracks([
+                  ...videoLayerTracks.filter((t) => t.layerId !== layerId),
+                  {
+                    layerId,
+                    disableOutsideRanges: true,
+                    ranges: [{ startFrame, endFrame, enabled: true }],
+                    keyframes: [],
+                  },
+                ]);
+              }}
+              activeLayerLabel={layersRef.current.find((l) => l.id === activeLayerIdRef.current)?.name ?? ""}
               workflowBusy={transientState.workflowBusy}
               videoSource={videoSource}
               canRenderVideo={canRenderVideo}
@@ -2640,6 +2860,20 @@ const Index = () => {
               videoPreviewBusy={transientState.videoPreviewBusy}
               videoMetadata={videoMetadata}
               onRunVideoWorkflow={handleRunVideoWorkflow}
+              // Render queue integration
+              renderJobs={videoRenderQueue.jobs}
+              activeRenderJobId={videoRenderQueue.activeJobId}
+              onSelectRenderJob={videoRenderQueue.setActiveJobId}
+              onCancelRenderJob={videoRenderQueue.cancelJob}
+              onClearCompletedRenderJobs={videoRenderQueue.clearCompletedJobs}
+              // Ghost frame context
+              videoId={videoSource ? (getNativeFilePath(videoSource) ?? videoSource.name) : null}
+              videoInputPath={videoSource ? getNativeFilePath(videoSource) : null}
+              videoWidth={videoMetadata?.width ?? 0}
+              videoHeight={videoMetadata?.height ?? 0}
+              layerPayload={activeLayersPayload as unknown[]}
+              layerTracks={videoLayerTracks as unknown[]}
+              videoProcessingBackend={videoGpuPreviewEnabled ? "gpu" : "cpu"}
             />
 
             {!focusMode && (
